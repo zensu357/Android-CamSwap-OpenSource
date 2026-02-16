@@ -108,4 +108,4 @@ keyPassword=your_key_password
 
 如果你喜欢这个项目，请给这个项目点个Star
 
-![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=Date)
+![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=Date&cache=20260216)
