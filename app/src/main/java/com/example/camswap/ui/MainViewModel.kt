@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 data class MainUiState(
     val isModuleDisabled: Boolean = false,
@@ -24,7 +27,8 @@ data class MainUiState(
     val hasPermission: Boolean = false,
     val isXposedActive: Boolean = false,
     val targetAppsCount: Int = 0,
-    val originalVideoName: String? = null
+    val originalVideoName: String? = null,
+    val latestVersion: String? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -34,6 +38,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadConfig()
+        checkLatestVersion()
     }
 
     fun loadConfig() {
@@ -126,5 +131,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateXposedStatus(isActive: Boolean) {
         _uiState.update { it.copy(isXposedActive = isActive) }
+    }
+
+    private fun checkLatestVersion() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val url = URL("https://api.github.com/repos/zensu357/Android-CamSwap-OpenSource/releases/latest")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+
+                if (conn.responseCode == 200) {
+                    val json = conn.inputStream.bufferedReader().use { it.readText() }
+                    val tagName = JSONObject(json).optString("tag_name", "")
+                    if (tagName.isNotEmpty()) {
+                        _uiState.update { it.copy(latestVersion = tagName) }
+                    }
+                }
+                conn.disconnect()
+            } catch (_: Exception) {
+                // 网络不可用或请求失败，静默忽略
+            }
+        }
     }
 }

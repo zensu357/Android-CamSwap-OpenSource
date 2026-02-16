@@ -88,7 +88,81 @@ fun HomeScreen(
             onPermissionRequest = onPermissionRequest
         )
 
+        VersionCard(
+            currentVersion = com.example.camswap.BuildConfig.VERSION_NAME,
+            latestVersion = mainUiState.latestVersion
+        )
+
         SupportCard()
+    }
+}
+
+/**
+ * 版本信息卡片
+ */
+@Composable
+fun VersionCard(
+    currentVersion: String,
+    latestVersion: String?
+) {
+    val context = LocalContext.current
+    
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+            .clickable {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/zensu357/Android-CamSwap-OpenSource/releases"))
+                )
+            },
+        shape = MaterialTheme.shapes.large
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "当前版本",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = currentVersion,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "最新版本",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = latestVersion ?: "正在检查...",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (latestVersion != null && latestVersion != "v$currentVersion" && latestVersion != currentVersion) 
+                            MaterialTheme.colorScheme.primary 
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -392,7 +466,7 @@ fun SupportCard() {
                     .fillMaxWidth()
                     .clickable {
                         context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/peihua8858/Android-CamSwap-VCAM-Revise-"))
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/zensu357/Android-CamSwap-OpenSource"))
                         )
                     }
                     .padding(vertical = 8.dp),
@@ -424,7 +498,7 @@ fun SupportCard() {
                     .fillMaxWidth()
                     .clickable {
                         context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/camswap"))
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/CamSwap"))
                         )
                     }
                     .padding(vertical = 8.dp),

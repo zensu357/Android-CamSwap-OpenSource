@@ -17,3 +17,6 @@ app/build/
 release-key.jks
 releases/
 build_output.txt
+build_error_release.txt
+build_error.log
+.vscode/settings.json
