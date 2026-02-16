@@ -102,3 +102,6 @@ keyPassword=your_key_password
 ## 📄 许可证
 
 本项目基于 MIT 许可证开源。详情请参阅 [LICENSE](LICENSE) 文件。
+
+如果你喜欢这个项目，请给这个项目点个Star，支持我
+![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=Date)
