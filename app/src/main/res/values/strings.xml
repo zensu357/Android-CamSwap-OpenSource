@@ -72,4 +72,59 @@
     <string name="nav_home">首页</string>
     <string name="nav_manage">管理</string>
     <string name="nav_settings">设置</string>
+
+    <!-- Additional Settings -->
+    <string name="settings_force_warning">强制显示警告</string>
+    <string name="settings_force_warning_desc">在Hook成功时显示Toast提示</string>
+    <string name="settings_force_private_dir">强制私有目录</string>
+    <string name="settings_force_private_dir_desc">解决部分应用无法读取文件的问题</string>
+    <string name="settings_disable_toast">禁用Toast</string>
+    <string name="settings_disable_toast_desc">隐藏所有操作提示</string>
+    <string name="settings_system_permission">系统权限设置</string>
+    <string name="settings_system_permission_desc">管理应用的存储和通知权限</string>
+
+    <!-- About Section -->
+    <string name="about_title">关于</string>
+    <string name="about_app_name">Android CamSwap</string>
+    <string name="about_version">版本 %s</string>
+    <string name="about_build_time">构建时间: %s</string>
+    <string name="about_desc">基于 Xposed 框架的虚拟摄像头模块</string>
+    
+    <!-- Language -->
+    <string name="settings_language">语言 / Language</string>
+    <string name="settings_language_desc">切换应用语言 / Switch App Language</string>
+    <string name="language_system_default">系统默认 / System Default</string>
+    <string name="language_en">English</string>
+    <string name="language_zh">中文</string>
+
+    <!-- Notification Service -->
+    <string name="notif_rotate_label">旋转:</string>
+    <string name="notif_rotate_offset">旋转偏移: </string>
+    <string name="notif_action_next">下一条</string>
+    <string name="notif_action_exit">退出</string>
+    <string name="notif_channel_name">Camswap控制服务</string>
+    <string name="notif_channel_desc">显示Camswap视频切换控制</string>
+
+    <!-- Home Screen - Version Card -->
+    <string name="version_current">当前版本</string>
+    <string name="version_latest">最新版本</string>
+    <string name="version_check_github">点击前往 GitHub 查看</string>
+
+    <!-- Home Screen - Status Card -->
+    <string name="status_module_inactive">模块未激活</string>
+    <string name="status_activate_hint">请在 Xposed 管理器中激活模块并重启</string>
+    <string name="status_grant_permission">授予权限</string>
+    <string name="status_add_video_hint">请在管理页面添加视频</string>
+    <string name="status_select_video_hint">请在管理页面选择视频</string>
+
+    <!-- Home Screen - Support Card -->
+    <string name="support_title">支持</string>
+    <string name="support_github">在 GitHub 查看、反馈</string>
+    <string name="support_telegram">加入 Telegram 频道</string>
+
+    <!-- Manage Screen -->
+    <string name="media_current_selection">当前选择</string>
+
+    <!-- Toast / Migration -->
+    <string name="config_migrated">配置已自动迁移</string>
 </resources>

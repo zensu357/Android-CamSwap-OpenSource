@@ -1,6 +1,7 @@
 package com.example.camswap.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.camswap.ConfigManager
@@ -131,6 +132,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateXposedStatus(isActive: Boolean) {
         _uiState.update { it.copy(isXposedActive = isActive) }
+    }
+
+    fun setLanguage(context: Context, language: String) {
+        com.example.camswap.utils.LocaleHelper.setLocale(context, language)
+        // Restart app to apply changes
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
     }
 
     private fun checkLatestVersion() {

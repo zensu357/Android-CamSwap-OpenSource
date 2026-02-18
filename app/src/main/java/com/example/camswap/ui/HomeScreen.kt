@@ -131,7 +131,7 @@ fun VersionCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "当前版本",
+                    text = stringResource(R.string.version_current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
@@ -150,12 +150,12 @@ fun VersionCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "最新版本",
+                    text = stringResource(R.string.version_latest),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
                 Text(
-                    text = latestVersion ?: "点击前往 GitHub 查看",
+                    text = latestVersion ?: stringResource(R.string.version_check_github),
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -186,7 +186,7 @@ fun StatusCard(
         !isXposedActive -> Quadruple(
             colorScheme.errorContainer,
             colorScheme.onErrorContainer,
-            "模块未激活",
+            stringResource(R.string.status_module_inactive),
             Icons.Default.Error
         )
         !hasPermission -> Quadruple(
@@ -260,7 +260,7 @@ fun StatusCard(
             // ========== 详细状态区域 ==========
             if (!isXposedActive) {
                 Text(
-                    text = "请在 Xposed 管理器中激活模块并重启",
+                    text = stringResource(R.string.status_activate_hint),
                     fontSize = 14.sp,
                     color = textColor.copy(alpha = 0.8f)
                 )
@@ -273,17 +273,17 @@ fun StatusCard(
                     ),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Text("授予权限", fontSize = 14.sp)
+                    Text(stringResource(R.string.status_grant_permission), fontSize = 14.sp)
                 }
             } else if (!hasVideo) {
                 Text(
-                    text = "请在管理页面添加视频",
+                    text = stringResource(R.string.status_add_video_hint),
                     fontSize = 14.sp,
                     color = textColor.copy(alpha = 0.8f)
                 )
             } else if (!isSelected) {
                 Text(
-                    text = "请在管理页面选择视频",
+                    text = stringResource(R.string.status_select_video_hint),
                     fontSize = 14.sp,
                     color = textColor.copy(alpha = 0.8f)
                 )
@@ -448,7 +448,7 @@ fun SupportCard() {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "支持",
+                    text = stringResource(R.string.support_title),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold
                     ),
@@ -478,7 +478,7 @@ fun SupportCard() {
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "在 GitHub 查看、反馈",
+                    text = stringResource(R.string.support_github),
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -510,7 +510,7 @@ fun SupportCard() {
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "加入 Telegram 频道",
+                    text = stringResource(R.string.support_telegram),
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
+    ) { _ ->
         checkPermissionsStatus()
     }
 
@@ -51,13 +51,17 @@ class MainActivity : ComponentActivity() {
         checkPermissionsStatus()
     }
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(com.example.camswap.utils.LocaleHelper.onAttach(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         // Migration logic
         val configManager = ConfigManager()
         if (configManager.migrateIfNeeded()) {
-            Toast.makeText(this, "配置已自动迁移", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.config_migrated), Toast.LENGTH_LONG).show()
         }
 
         // Auto-start service if enabled

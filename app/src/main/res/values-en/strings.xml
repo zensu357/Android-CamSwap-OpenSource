@@ -1,25 +1,130 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">CamSwap</string>
-    <string name="click_to_go_to_repo">click to go to repository</string>
-    <string name="description">Please go to online repository to check for latest update, latest usgae and report bugs</string>
-    <string name="Warning">DO NOT USE FOR ANY ILLEGAL PURPOSE !!YOU NEED TO TAKE ALL RESPONSIBILITY AND CONSEQUENCE!!</string>
-    <string name="switch1">Force to show permission lack warning</string>
-    <string name="switch2">Disable the module temporarily (On is disable)</string>
-    <string name="switch3">Play sounds of videos</string>
-    <string name="switch4">Force every app use private Force every app use private directory (No matter the permission)</string>
-    <string name="switch5">Disable toast message</string>
-    <string name="permission_lack_warn">Missing permissions</string>
-    <string name="permission_description">The permission to access local storage is used to set up configuration files. If refused you need to set up file manually.</string>
-    <string name="positive">Sure</string>
-    <string name="negative">Refuse</string>
+    <string name="click_to_go_to_repo">Go to GitHub Repo</string>
+    <string name="description">Visit the online repo for updates, tutorials, and feedback.</string>
+    <string name="Warning">Strictly prohibited for illegal use!! Users bear all responsibilities and consequences!!</string>
+    <string name="switch1">Force Show Permission Warning</string>
+    <string name="switch2">Temporarily Disable Module (Enable to disable)</string>
+    <string name="switch3">Play Video Sound</string>
+    <string name="switch4">Force Private Directory for All Apps</string>
+    <string name="gitee" translatable="false">Go to Gitee Repo (China optimized)</string>
+    <string name="switch5">Disable Toast Messages</string>
+    <string name="permission_switch_text">Grant Local Storage Permission</string>
+    <string name="permission_lack_warn">Missing Necessary Permissions</string>
+    <string name="permission_description">Storage permission is needed for config files. If denied, manual configuration is required.</string>
+    <string name="positive">Confirm</string>
+    <string name="negative">Deny</string>
     <string name="settings_title">Settings</string>
+
+    <!-- Home Screen Status -->
+    <string name="status_no_permission">No Permission</string>
+    <string name="status_no_video">No Replacement Video Set</string>
+    <string name="status_no_selection">No Video Selected</string>
+    <string name="status_working">Active</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_label_video">Video Source</string>
+    <string name="status_label_play_mode">Play Mode</string>
+    <string name="status_label_mic">Microphone</string>
+    <string name="status_label_video_sound">Original Video Sound</string>
+    <string name="status_label_notification">Notification Control</string>
+    <string name="status_label_target_apps">Target Apps</string>
+    <string name="status_value_on">On</string>
+    <string name="status_value_off">Off</string>
+    <string name="status_value_random">Random Mode</string>
+    <string name="status_value_random_play">Random Play</string>
+    <string name="status_value_sequential_play">Sequential Play</string>
+    <string name="status_value_mic_mute">Mute</string>
+    <string name="status_value_mic_replace">Audio Replace</string>
+    <string name="status_value_mic_sync">Video Sync</string>
+    <string name="status_value_all_apps">All Apps</string>
+
+    <!-- Manage Screen -->
+    <string name="tab_video_manage">Video Manage</string>
+    <string name="tab_image_manage">Image Manage</string>
+    <string name="tab_audio_manage">Audio Manage</string>
+    <string name="desc_add_media">Add Media</string>
+    <string name="stats_video_format">Total: %1$d | Size: %2$.2f MB | Duration: %3$s</string>
+    <string name="stats_image_format">Total: %1$d | Size: %2$.2f MB</string>
+    <string name="stats_audio_format">Total: %1$d | Size: %2$.2f MB</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_category_general">General Settings</string>
+    <string name="settings_notification_control">Enable Notification Control</string>
+    <string name="settings_notification_control_desc">Quick switch video in notification</string>
+    <string name="settings_play_sound">Play Sound</string>
+    <string name="settings_play_sound_desc">Play original audio when replacing</string>
     <string name="settings_mic_hook">Microphone Hook</string>
-    <string name="settings_mic_hook_desc">Hook microphone input to replace or mute audio capture</string>
+    <string name="settings_mic_hook_desc">Hook mic input to replace or mute audio</string>
     <string name="mic_mode_mute">Mute Mode</string>
-    <string name="mic_mode_mute_desc">Output silent data, the other party cannot hear anything</string>
+    <string name="mic_mode_mute_desc">Output silent data, no sound heard</string>
     <string name="mic_mode_replace">Audio Replace</string>
-    <string name="mic_mode_replace_desc">Inject custom audio file (place Mic.mp3 in DCIM/Camera1/)</string>
+    <string name="mic_mode_replace_desc">Inject custom audio file (Put Mic.mp3 in DCIM/Camera1/)</string>
     <string name="mic_mode_video_sync">Video Sync</string>
-    <string name="mic_mode_video_sync_desc">Play the audio track from the current replacement video</string>
+    <string name="mic_mode_video_sync_desc">Play audio track of current video</string>
+    <string name="settings_random_play">Random Play</string>
+    <string name="settings_random_play_desc">Randomly play from video list</string>
+    <string name="settings_category_advanced">Advanced Settings</string>
+    <string name="settings_disable_module">Disable Module</string>
+    <string name="settings_disable_module_desc">Temporarily disable all Hook functions</string>
+    
+    <!-- Additional Settings -->
+    <string name="settings_force_warning">Force Show Warning</string>
+    <string name="settings_force_warning_desc">Show Toast when Hook succeeds</string>
+    <string name="settings_force_private_dir">Force Private Dir</string>
+    <string name="settings_force_private_dir_desc">Fix file read issues for some apps</string>
+    <string name="settings_disable_toast">Disable Toast</string>
+    <string name="settings_disable_toast_desc">Hide all operation toasts</string>
+    <string name="settings_system_permission">System Permission Settings</string>
+    <string name="settings_system_permission_desc">Manage storage and notification permissions</string>
+
+    <!-- About Section -->
+    <string name="about_title">About</string>
+    <string name="about_app_name">Android CamSwap</string>
+    <string name="about_version">Version %s</string>
+    <string name="about_build_time">Build Time: %s</string>
+    <string name="about_desc">Virtual Camera Module based on Xposed Framework</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_manage">Manage</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Language -->
+    <string name="settings_language">Language / 语言</string>
+    <string name="settings_language_desc">Switch App Language / 切换应用语言</string>
+    <string name="language_system_default">System Default / 系统默认</string>
+    <string name="language_en">English</string>
+    <string name="language_zh">中文</string>
+
+    <!-- Notification Service -->
+    <string name="notif_rotate_label">Rotate:</string>
+    <string name="notif_rotate_offset">Rotation Offset: </string>
+    <string name="notif_action_next">Next</string>
+    <string name="notif_action_exit">Exit</string>
+    <string name="notif_channel_name">Camswap Control Service</string>
+    <string name="notif_channel_desc">Show Camswap video control</string>
+
+    <!-- Home Screen - Version Card -->
+    <string name="version_current">Current Version</string>
+    <string name="version_latest">Latest Version</string>
+    <string name="version_check_github">Click to check on GitHub</string>
+
+    <!-- Home Screen - Status Card -->
+    <string name="status_module_inactive">Module Not Active</string>
+    <string name="status_activate_hint">Please activate the module in Xposed manager and reboot</string>
+    <string name="status_grant_permission">Grant Permission</string>
+    <string name="status_add_video_hint">Please add videos in the Manage tab</string>
+    <string name="status_select_video_hint">Please select a video in the Manage tab</string>
+
+    <!-- Home Screen - Support Card -->
+    <string name="support_title">Support</string>
+    <string name="support_github">View &amp; report issues on GitHub</string>
+    <string name="support_telegram">Join Telegram Channel</string>
+
+    <!-- Manage Screen -->
+    <string name="media_current_selection">Selected</string>
+
+    <!-- Toast / Migration -->
+    <string name="config_migrated">Configuration has been migrated</string>
 </resources>

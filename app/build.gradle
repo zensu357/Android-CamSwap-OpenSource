@@ -34,7 +34,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode versionCodeInt
-        versionName "0.16.${versionSuffix}"
+        versionName "0.18.${versionSuffix}"
         
         // Inject build time into BuildConfig
         buildConfigField "String", "BUILD_TIME", "\"${buildTime}\""
@@ -115,4 +115,7 @@ dependencies {
     // Coil for image loading and video thumbnails
     implementation 'io.coil-kt:coil-compose:2.5.0'
     implementation 'io.coil-kt:coil-video:2.5.0'
+    
+    // Preference
+    implementation 'androidx.preference:preference-ktx:1.2.1'
 }

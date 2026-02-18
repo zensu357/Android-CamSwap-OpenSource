@@ -321,7 +321,7 @@ fun MediaItemRow(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "当前选择",
+                            text = stringResource(R.string.media_current_selection),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
