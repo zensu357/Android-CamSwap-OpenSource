@@ -14,7 +14,8 @@ Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能�
 *   **跨进程兼容**：使用 ContentProvider 分发数据，目标应用无需申请存储权限即可读取虚拟视频流。
 *   **实时控制**：
     *   支持通过通知栏快捷切换下一个视频。
-    *   支持广播指令控制 (`com.example.camswap.ACTION_CAMSWAP_NEXT`)。
+    *   支持通过通知栏快捷切换视频旋转方向。
+    *   支持随机播放。
 *   **现代化 UI**：基于 Material Design 3 和 Jetpack Compose 构建的管理界面。
 *   **自动旋转**：支持根据视频元数据自动处理旋转角度。
 
@@ -99,6 +100,15 @@ keyPassword=your_key_password
 请勿将本项目用于任何非法用途（包括但不限于人脸识别绕过、诈骗等）。
 使用者需自行承担因使用本项目而产生的一切法律责任。
 
+
+## ❤️ 支持
+
+请点Star以示支持，感谢你的支持。
+![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=202602)
+
+
 ## 📄 许可证
 
 本项目基于 MIT 许可证开源。详情请参阅 [LICENSE](LICENSE) 文件。
+
+
