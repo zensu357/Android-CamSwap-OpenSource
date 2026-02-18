@@ -155,11 +155,9 @@ fun VersionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
                 Text(
-                    text = latestVersion ?: "正在检查...",
+                    text = latestVersion ?: "点击前往 GitHub 查看",
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (latestVersion != null && latestVersion != "v$currentVersion" && latestVersion != currentVersion) 
-                            MaterialTheme.colorScheme.primary 
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }

@@ -38,11 +38,12 @@ public class ConfigManager {
     public static final String KEY_ORIGINAL_VIDEO_NAME = "original_video_name";
     public static final String KEY_SELECTED_IMAGE = "selected_image";
     public static final String KEY_ENABLE_MIC_HOOK = "enable_mic_hook";
-    public static final String KEY_MIC_HOOK_MODE = "mic_hook_mode";       // "mute" | "replace" | "video_sync"
-    public static final String KEY_SELECTED_AUDIO = "selected_audio";     // 音频文件名
+    public static final String KEY_MIC_HOOK_MODE = "mic_hook_mode"; // "mute" | "replace" | "video_sync"
+    public static final String KEY_SELECTED_AUDIO = "selected_audio"; // 音频文件名
     public static final String MIC_MODE_MUTE = "mute";
     public static final String MIC_MODE_REPLACE = "replace";
     public static final String MIC_MODE_VIDEO_SYNC = "video_sync";
+    public static final String KEY_VIDEO_ROTATION_OFFSET = "video_rotation_offset"; // 手动旋转偏移 0/90/180/270
 
     // Fallback switch
     public static boolean ENABLE_LEGACY_FILE_ACCESS = true;
@@ -61,7 +62,7 @@ public class ConfigManager {
             reload();
         }
     }
-    
+
     public void setSkipProviderReload(boolean skip) {
         this.skipProviderReload = skip;
     }
@@ -90,7 +91,7 @@ public class ConfigManager {
         if (context != null && !skipProviderReload) {
             providerSuccess = reloadFromProvider();
         }
-        
+
         if (!providerSuccess && ENABLE_LEGACY_FILE_ACCESS) {
             reloadFromFile();
         }
@@ -115,7 +116,7 @@ public class ConfigManager {
                     String key = cursor.getString(0);
                     String valueStr = cursor.getString(1);
                     String type = cursor.getString(2);
-                    
+
                     try {
                         if ("boolean".equals(type)) {
                             newConfig.put(key, Boolean.parseBoolean(valueStr));
@@ -134,15 +135,16 @@ public class ConfigManager {
                 }
                 cursor.close();
                 configData = newConfig;
-                
+
                 // Debug log
                 com.example.camswap.utils.LogUtil.log("【CS】配置已通过 ContentProvider 重新加载: " + configData.toString());
-                
+
                 return true;
             } else {
-                 com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 返回的 Cursor 为空, URI: " + uri.toString());
-                 // Log caller to identify who is triggering reload
-                 com.example.camswap.utils.LogUtil.log("【CS】Reload trigger stack: " + android.util.Log.getStackTraceString(new Throwable()));
+                com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 返回的 Cursor 为空, URI: " + uri.toString());
+                // Log caller to identify who is triggering reload
+                com.example.camswap.utils.LogUtil
+                        .log("【CS】Reload trigger stack: " + android.util.Log.getStackTraceString(new Throwable()));
             }
         } catch (Exception e) {
             com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 错误: " + e.toString());
@@ -171,23 +173,45 @@ public class ConfigManager {
                     com.example.camswap.utils.LogUtil.log("【CS】Content: " + configData.toString());
                 } catch (Exception e) {
                     e.printStackTrace();
-                    if (configData == null) configData = new JSONObject();
+                    if (configData == null)
+                        configData = new JSONObject();
                 }
             }
         } else {
             // Debug log for missing config
             com.example.camswap.utils.LogUtil.log("【CS】Config file not found: " + configFile.getAbsolutePath());
-            
+
             // Only reset if we haven't loaded anything yet or if the file was deleted
             if (configData == null) {
                 configData = new JSONObject();
             }
-            // Don't reset lastLoadedTime so we don't reload empty config if file is missing but we have data in memory
+            // Don't reset lastLoadedTime so we don't reload empty config if file is missing
+            // but we have data in memory
         }
     }
 
     public boolean getBoolean(String key, boolean defValue) {
         return configData.optBoolean(key, defValue);
+    }
+
+    public int getInt(String key, int defValue) {
+        return configData.optInt(key, defValue);
+    }
+
+    public void setInt(String key, int value) {
+        try {
+            configData.put(key, value);
+            save();
+            if (context != null) {
+                try {
+                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
+                    context.getContentResolver().notifyChange(uri, null);
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
     }
 
     public void setBoolean(String key, boolean value) {
@@ -199,7 +223,8 @@ public class ConfigManager {
                 try {
                     android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
                     context.getContentResolver().notifyChange(uri, null);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
         } catch (JSONException e) {
             e.printStackTrace();
@@ -254,12 +279,14 @@ public class ConfigManager {
         try {
             configData.put(key, value);
             save();
-            // Notify if context is available (only for App process, Hook process usually doesn't write)
+            // Notify if context is available (only for App process, Hook process usually
+            // doesn't write)
             if (context != null) {
                 try {
                     android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
                     context.getContentResolver().notifyChange(uri, null);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
         } catch (JSONException e) {
             e.printStackTrace();
@@ -285,14 +312,14 @@ public class ConfigManager {
     public boolean migrateIfNeeded() {
         boolean migrated = false;
         File dir = new File(DEFAULT_CONFIG_DIR);
-        
+
         // Map old files to new keys
         String[][] fileToKey = {
-            {"disable.jpg", KEY_DISABLE_MODULE},
-            {"force_show.jpg", KEY_FORCE_SHOW_WARNING},
-            {"no-silent.jpg", KEY_PLAY_VIDEO_SOUND},
-            {"private_dir.jpg", KEY_FORCE_PRIVATE_DIR},
-            {"no_toast.jpg", KEY_DISABLE_TOAST}
+                { "disable.jpg", KEY_DISABLE_MODULE },
+                { "force_show.jpg", KEY_FORCE_SHOW_WARNING },
+                { "no-silent.jpg", KEY_PLAY_VIDEO_SOUND },
+                { "private_dir.jpg", KEY_FORCE_PRIVATE_DIR },
+                { "no_toast.jpg", KEY_DISABLE_TOAST }
         };
 
         for (String[] map : fileToKey) {
@@ -303,19 +330,19 @@ public class ConfigManager {
                 migrated = true;
             }
         }
-        
+
         return migrated;
     }
-    
+
     public void resetToDefault() {
         configData = new JSONObject();
         save();
     }
-    
+
     public String exportConfig() {
         return configData.toString();
     }
-    
+
     public void importConfig(String json) throws JSONException {
         configData = new JSONObject(json);
         save();

@@ -134,26 +134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun checkLatestVersion() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val url = URL("https://api.github.com/repos/zensu357/Android-CamSwap-OpenSource/releases/latest")
-                val conn = url.openConnection() as HttpURLConnection
-                conn.requestMethod = "GET"
-                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
-
-                if (conn.responseCode == 200) {
-                    val json = conn.inputStream.bufferedReader().use { it.readText() }
-                    val tagName = JSONObject(json).optString("tag_name", "")
-                    if (tagName.isNotEmpty()) {
-                        _uiState.update { it.copy(latestVersion = tagName) }
-                    }
-                }
-                conn.disconnect()
-            } catch (_: Exception) {
-                // 网络不可用或请求失败，静默忽略
-            }
-        }
+        // 无网络权限，通过 LSPosed 托管更新
+        _uiState.update { it.copy(latestVersion = null) }
     }
 }

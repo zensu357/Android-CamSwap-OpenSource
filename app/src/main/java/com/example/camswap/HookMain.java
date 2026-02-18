@@ -1,6 +1,5 @@
 package com.example.camswap;
 
-
 import android.Manifest;
 import android.app.Application;
 import android.content.Context;
@@ -66,15 +65,15 @@ public class HookMain implements IXposedHookLoadPackage {
 
     public static Camera camera_onPreviewFrame;
     public static Camera start_preview_camera;
-    public static volatile byte[] data_buffer = {0};
+    public static volatile byte[] data_buffer = { 0 };
     public static byte[] input;
     public static int mhight;
     public static int mwidth;
     public static boolean is_someone_playing;
     public static boolean is_hooked;
     public static VideoToFrames hw_decode_obj;
-    public static VideoToFrames c2_hw_decode_obj;
-    public static VideoToFrames c2_hw_decode_obj_1;
+    public static MediaPlayer c2_reader_player;
+    public static MediaPlayer c2_reader_player_1;
     public static SurfaceTexture c1_fake_texture;
     public static Surface c1_fake_surface;
     public static SurfaceHolder ori_holder;
@@ -82,9 +81,18 @@ public class HookMain implements IXposedHookLoadPackage {
     public static Camera mcamera1;
     public static int imageReaderFormat = 0;
     public static boolean is_first_hook_build = true;
+    public static volatile int mDisplayOrientation = 0; // 宿主App通过setDisplayOrientation设置的期望方向
 
     // Thread safety lock for MediaPlayer/decoder operations
     private static final Object mediaLock = new Object();
+
+    // GL renderers for rotation (one per MediaPlayer)
+    public static GLVideoRenderer c2_reader_renderer;
+    public static GLVideoRenderer c2_reader_renderer_1;
+    public static GLVideoRenderer c2_renderer;
+    public static GLVideoRenderer c2_renderer_1;
+    public static GLVideoRenderer c1_renderer_holder;
+    public static GLVideoRenderer c1_renderer_texture;
 
     public static int onemhight;
     public static int onemwidth;
@@ -97,7 +105,7 @@ public class HookMain implements IXposedHookLoadPackage {
     private static void checkProviderAvailability() {
         VideoManager.checkProviderAvailability();
     }
-    
+
     // Removed FileObserver logic
     private static android.database.ContentObserver configObserver;
     private static FileObserver configFileObserver;
@@ -115,7 +123,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     restartDecoders();
                 }
             };
-            
+
             boolean observerRegistered = false;
             try {
                 android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
@@ -130,7 +138,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 LogUtil.log("【CS】Provider 不可用，启用 FileObserver 监听配置文件");
                 try {
                     String configDir = ConfigManager.DEFAULT_CONFIG_DIR;
-                    configFileObserver = new FileObserver(configDir, FileObserver.MODIFY | FileObserver.CREATE | FileObserver.MOVED_TO) {
+                    configFileObserver = new FileObserver(configDir,
+                            FileObserver.MODIFY | FileObserver.CREATE | FileObserver.MOVED_TO) {
                         @Override
                         public void onEvent(int event, String path) {
                             if (path != null && path.endsWith(".json")) {
@@ -152,7 +161,8 @@ public class HookMain implements IXposedHookLoadPackage {
             }
 
             // Also register BroadcastReceiver for control signals (e.g. from Notification)
-            // This allows us to receive commands without relying solely on file/provider changes
+            // This allows us to receive commands without relying solely on file/provider
+            // changes
             try {
                 BroadcastReceiver receiver = new BroadcastReceiver() {
                     @Override
@@ -160,18 +170,26 @@ public class HookMain implements IXposedHookLoadPackage {
                         String action = intent.getAction();
                         LogUtil.log("【CS】收到广播指令: " + action);
                         if ("com.example.camswap.ACTION_CAMSWAP_NEXT".equals(action)) {
-                             // Provider 不可用时，直接走本地文件切换
-                             if (!VideoManager.isProviderAvailable()) {
-                                 VideoManager.switchVideo(true);
-                                 restartDecoders();
-                             } else {
-                                 switchVideo(true);
-                             }
+                            // Provider 不可用时，直接走本地文件切换
+                            if (!VideoManager.isProviderAvailable()) {
+                                VideoManager.switchVideo(true);
+                                restartDecoders();
+                            } else {
+                                switchVideo(true);
+                            }
+                        } else if ("com.example.camswap.ACTION_CAMSWAP_ROTATE".equals(action)) {
+                            // 旋转偏移变更，重载配置
+                            getConfig().forceReload();
+                            int newRotation = getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+                            LogUtil.log("【CS】旋转偏移已更新: " + newRotation + "°");
+                            // 通过 GL 渲染器实时更新旋转，无需重启播放器
+                            updateAllRendererRotations(newRotation);
                         }
                     }
                 };
                 IntentFilter filter = new IntentFilter();
                 filter.addAction("com.example.camswap.ACTION_CAMSWAP_NEXT");
+                filter.addAction("com.example.camswap.ACTION_CAMSWAP_ROTATE");
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
                 } else {
@@ -194,21 +212,33 @@ public class HookMain implements IXposedHookLoadPackage {
         synchronized (mediaLock) {
             // Check provider availability
             checkProviderAvailability();
-            
-            // Restart Camera1 players
-            restartMediaPlayer(mplayer1, "mplayer1");
-            restartMediaPlayer(mMediaPlayer, "mMediaPlayer");
 
-            // Restart Camera2 decoders
-            restartDecoder(c2_hw_decode_obj, c2_reader_Surfcae, "c2_decoder");
-            restartDecoder(c2_hw_decode_obj_1, c2_reader_Surfcae_1, "c2_decoder_1");
+            // Restart Camera1 players (保持渲染器，只重载视频源)
+            restartMediaPlayer(mplayer1, c1_renderer_holder, "mplayer1");
+            restartMediaPlayer(mMediaPlayer, c1_renderer_texture, "mMediaPlayer");
+
+            // Restart Camera2 reader players
+            restartMediaPlayer(c2_reader_player, c2_reader_renderer, "c2_reader_player");
+            restartMediaPlayer(c2_reader_player_1, c2_reader_renderer_1, "c2_reader_player_1");
+
+            // Restart Camera2 preview players
+            restartMediaPlayer(c2_player, c2_renderer, "c2_player");
+            restartMediaPlayer(c2_player_1, c2_renderer_1, "c2_player_1");
         }
     }
 
-    private static void restartMediaPlayer(MediaPlayer player, String tag) {
-        if (player == null) return;
+    private static void restartMediaPlayer(MediaPlayer player, GLVideoRenderer renderer, String tag) {
+        if (player == null)
+            return;
         try {
+            if (player.isPlaying()) {
+                player.stop();
+            }
             player.reset();
+            // reset() 会清除 surface，需要重新设置
+            if (renderer != null && renderer.isInitialized()) {
+                player.setSurface(renderer.getInputSurface());
+            }
             android.os.ParcelFileDescriptor pfd = getVideoPFD();
             if (pfd != null) {
                 player.setDataSource(pfd.getFileDescriptor());
@@ -223,8 +253,65 @@ public class HookMain implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * 更新所有 GL 渲染器的旋转角度（实时生效，无需重启播放器）。
+     */
+    public static void updateAllRendererRotations(int degrees) {
+        GLVideoRenderer[] renderers = {
+                c2_reader_renderer, c2_reader_renderer_1,
+                c2_renderer, c2_renderer_1,
+                c1_renderer_holder, c1_renderer_texture
+        };
+        for (GLVideoRenderer r : renderers) {
+            if (r != null && r.isInitialized()) {
+                r.setRotation(degrees);
+            }
+        }
+        LogUtil.log("【CS】所有渲染器旋转角度已更新: " + degrees + "°");
+    }
+
+    /**
+     * 释放所有 GL 渲染器。
+     */
+    public static void releaseAllRenderers() {
+        GLVideoRenderer.releaseSafely(c2_reader_renderer);
+        c2_reader_renderer = null;
+        GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
+        c2_reader_renderer_1 = null;
+        GLVideoRenderer.releaseSafely(c2_renderer);
+        c2_renderer = null;
+        GLVideoRenderer.releaseSafely(c2_renderer_1);
+        c2_renderer_1 = null;
+        GLVideoRenderer.releaseSafely(c1_renderer_holder);
+        c1_renderer_holder = null;
+        GLVideoRenderer.releaseSafely(c1_renderer_texture);
+        c1_renderer_texture = null;
+    }
+
+    /**
+     * 为 MediaPlayer 创建 GL 渲染器并设置到目标 Surface。
+     * 失败时回退到直接 Surface（无旋转支持）。
+     *
+     * @return 创建的渲染器，失败返回 null
+     */
+    private static GLVideoRenderer setupPlayerWithRenderer(MediaPlayer player, Surface targetSurface, String tag) {
+        int rotation = getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+        GLVideoRenderer renderer = GLVideoRenderer.createSafely(targetSurface, tag);
+        if (renderer != null) {
+            player.setSurface(renderer.getInputSurface());
+            renderer.setRotation(rotation);
+            LogUtil.log("【CS】【GL】" + tag + " 使用 GL 渲染器 (旋转:" + rotation + "°)");
+        } else {
+            // Fallback: 直接播放到 Surface（无旋转支持）
+            player.setSurface(targetSurface);
+            LogUtil.log("【CS】" + tag + " 回退到直接 Surface（无旋转）");
+        }
+        return renderer;
+    }
+
     private static void restartDecoder(VideoToFrames decoder, Surface surface, String tag) {
-        if (decoder == null) return;
+        if (decoder == null)
+            return;
         try {
             decoder.setSaveFrames("null", OutputImageFormat.NV21);
             decoder.set_surfcae(surface);
@@ -274,25 +361,27 @@ public class HookMain implements IXposedHookLoadPackage {
     public static Class c2_state_callback;
     public static Context toast_content;
 
-    private static ConfigManager getConfig() {
+    public static ConfigManager getConfig() {
         return VideoManager.getConfig();
     }
 
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Exception {
         // Hook self to return true for isModuleActive
         if (lpparam.packageName.equals("com.example.camswap")) {
-            XposedHelpers.findAndHookMethod("com.example.camswap.MainActivity", lpparam.classLoader, "isModuleActive", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(true);
-                }
-            });
+            XposedHelpers.findAndHookMethod("com.example.camswap.MainActivity", lpparam.classLoader, "isModuleActive",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            param.setResult(true);
+                        }
+                    });
         }
 
         // Removed FileObserver init
-        
+
         // Initialize video path from config immediately
-        // Removed premature updateVideoPath call. Path setup should wait for Context and PermissionHelper.
+        // Removed premature updateVideoPath call. Path setup should wait for Context
+        // and PermissionHelper.
         // VideoManager.updateVideoPath(false);
 
         // Check if module is disabled
@@ -313,78 +402,71 @@ public class HookMain implements IXposedHookLoadPackage {
         // Initialize Microphone Handler
         new MicrophoneHandler().init(lpparam);
 
-        XposedHelpers.findAndHookMethod("android.media.MediaRecorder", lpparam.classLoader, "setCamera", Camera.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                super.beforeHookedMethod(param);
-                need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
-                LogUtil.log("【CS】[record]" + lpparam.packageName);
-                if (toast_content != null && need_to_show_toast) {
-                    try {
-                        showToast("应用：" + lpparam.appInfo.name + "(" + lpparam.packageName + ")" + "触发了录像，但目前无法拦截");
-                    }catch (Exception ee){
-                        LogUtil.log("【CS】[toast]" + Arrays.toString(ee.getStackTrace()));
+        XposedHelpers.findAndHookMethod("android.media.MediaRecorder", lpparam.classLoader, "setCamera", Camera.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        super.beforeHookedMethod(param);
+                        need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
+                        LogUtil.log("【CS】[record]" + lpparam.packageName);
+                        if (toast_content != null && need_to_show_toast) {
+                            try {
+                                showToast("应用：" + lpparam.appInfo.name + "(" + lpparam.packageName + ")"
+                                        + "触发了录像，但目前无法拦截");
+                            } catch (Exception ee) {
+                                LogUtil.log("【CS】[toast]" + Arrays.toString(ee.getStackTrace()));
+                            }
+                        }
                     }
-                }
-            }
-        });
+                });
 
-        XposedHelpers.findAndHookMethod("android.app.Instrumentation", lpparam.classLoader, "callApplicationOnCreate", Application.class, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                super.afterHookedMethod(param);
-                if (param.args[0] instanceof Application) {
-                    try {
-                        toast_content = ((Application) param.args[0]).getApplicationContext();
-                        VideoManager.setContext(toast_content);
-                        checkProviderAvailability(); // Check provider immediately
-                        
-                        // Initialize ConfigManager with context
-                        getConfig().setContext(toast_content);
-                        // Initialize ContentObserver
-                        initContentObserver(toast_content);
-                    } catch (Exception ee) {
-                        LogUtil.log("【CS】" + ee.toString());
+        XposedHelpers.findAndHookMethod("android.app.Instrumentation", lpparam.classLoader, "callApplicationOnCreate",
+                Application.class, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        super.afterHookedMethod(param);
+                        if (param.args[0] instanceof Application) {
+                            try {
+                                toast_content = ((Application) param.args[0]).getApplicationContext();
+                                VideoManager.setContext(toast_content);
+                                checkProviderAvailability(); // Check provider immediately
+
+                                // Initialize ConfigManager with context
+                                getConfig().setContext(toast_content);
+                                // Initialize ContentObserver
+                                initContentObserver(toast_content);
+                            } catch (Exception ee) {
+                                LogUtil.log("【CS】" + ee.toString());
+                            }
+
+                            // Delegate permission and path setup to PermissionHelper
+                            PermissionHelper.checkAndSetupPaths(toast_content, lpparam.packageName);
+                        }
                     }
-                    
-                    // Delegate permission and path setup to PermissionHelper
-                    PermissionHelper.checkAndSetupPaths(toast_content, lpparam.packageName);
-                }
-            }
-        });
+                });
 
-
-
-
-
-
-
-
-
-
-
-        
-
-        XposedHelpers.findAndHookMethod("android.media.ImageReader", lpparam.classLoader, "newInstance", int.class, int.class, int.class, int.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) {
-                LogUtil.log("【CS】应用创建了渲染器：宽：" + param.args[0] + " 高：" + param.args[1] + "格式" + param.args[2]);
-                c2_ori_width = (int) param.args[0];
-                c2_ori_height = (int) param.args[1];
-                imageReaderFormat = (int) param.args[2];
-                need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
-                if (toast_content != null && need_to_show_toast) {
-                    try {
-                        showToast("应用创建了渲染器：\n宽：" + param.args[0] + "\n高：" + param.args[1] + "\n一般只需要宽高比与视频相同");
-                    } catch (Exception e) {
-                        LogUtil.log("【CS】[toast]" + e.toString());
+        XposedHelpers.findAndHookMethod("android.media.ImageReader", lpparam.classLoader, "newInstance", int.class,
+                int.class, int.class, int.class, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        LogUtil.log("【CS】应用创建了渲染器：宽：" + param.args[0] + " 高：" + param.args[1] + "格式" + param.args[2]);
+                        c2_ori_width = (int) param.args[0];
+                        c2_ori_height = (int) param.args[1];
+                        imageReaderFormat = (int) param.args[2];
+                        need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
+                        if (toast_content != null && need_to_show_toast) {
+                            try {
+                                showToast("应用创建了渲染器：\n宽：" + param.args[0] + "\n高：" + param.args[1] + "\n一般只需要宽高比与视频相同");
+                            } catch (Exception e) {
+                                LogUtil.log("【CS】[toast]" + e.toString());
+                            }
+                        }
                     }
-                }
-            }
-        });
+                });
 
-
-        XposedHelpers.findAndHookMethod("android.hardware.camera2.CameraCaptureSession.CaptureCallback", lpparam.classLoader, "onCaptureFailed", CameraCaptureSession.class, CaptureRequest.class, CaptureFailure.class,
+        XposedHelpers.findAndHookMethod("android.hardware.camera2.CameraCaptureSession.CaptureCallback",
+                lpparam.classLoader, "onCaptureFailed", CameraCaptureSession.class, CaptureRequest.class,
+                CaptureFailure.class,
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
@@ -396,52 +478,69 @@ public class HookMain implements IXposedHookLoadPackage {
 
     public static void process_camera2_play() {
 
+        // Camera2 reader 路径：MediaPlayer + GL 旋转渲染器
         if (c2_reader_Surfcae != null) {
-            if (c2_hw_decode_obj == null) {
-                c2_hw_decode_obj = new VideoToFrames();
+            if (c2_reader_player == null) {
+                c2_reader_player = new MediaPlayer();
+            } else {
+                c2_reader_player.release();
+                c2_reader_player = new MediaPlayer();
             }
-
+            // 创建 GL 渲染器（失败则回退到直接 Surface）
+            GLVideoRenderer.releaseSafely(c2_reader_renderer);
+            c2_reader_renderer = setupPlayerWithRenderer(c2_reader_player, c2_reader_Surfcae, "c2_reader");
+            c2_reader_player.setVolume(0, 0);
+            c2_reader_player.setLooping(true);
             try {
-                if (imageReaderFormat == 256) {
-                    c2_hw_decode_obj.setSaveFrames("null", OutputImageFormat.JPEG);
-                } else {
-                    c2_hw_decode_obj.setSaveFrames("null", OutputImageFormat.NV21);
-                }
-                c2_hw_decode_obj.set_surfcae(c2_reader_Surfcae);
+                c2_reader_player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                    public void onPrepared(MediaPlayer mp) {
+                        c2_reader_player.start();
+                        LogUtil.log("【CS】c2_reader_player 已启动播放");
+                    }
+                });
                 android.os.ParcelFileDescriptor pfd = getVideoPFD();
                 if (pfd != null) {
-                    c2_hw_decode_obj.reset(pfd);
+                    c2_reader_player.setDataSource(pfd.getFileDescriptor());
+                    pfd.close();
                 } else {
-                    c2_hw_decode_obj.reset(getCurrentVideoPath());
+                    c2_reader_player.setDataSource(getCurrentVideoPath());
                 }
-            } catch (Throwable throwable) {
-                LogUtil.log("【CS】" + throwable);
+                c2_reader_player.prepare();
+            } catch (Exception e) {
+                LogUtil.log("【CS】[c2_reader_player]" + e);
             }
         }
 
         if (c2_reader_Surfcae_1 != null) {
-            if (c2_hw_decode_obj_1 == null) {
-                c2_hw_decode_obj_1 = new VideoToFrames();
+            if (c2_reader_player_1 == null) {
+                c2_reader_player_1 = new MediaPlayer();
+            } else {
+                c2_reader_player_1.release();
+                c2_reader_player_1 = new MediaPlayer();
             }
-
+            GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
+            c2_reader_renderer_1 = setupPlayerWithRenderer(c2_reader_player_1, c2_reader_Surfcae_1, "c2_reader_1");
+            c2_reader_player_1.setVolume(0, 0);
+            c2_reader_player_1.setLooping(true);
             try {
-                if (imageReaderFormat == 256) {
-                    c2_hw_decode_obj_1.setSaveFrames("null", OutputImageFormat.JPEG);
-                } else {
-                    c2_hw_decode_obj_1.setSaveFrames("null", OutputImageFormat.NV21);
-                }
-                c2_hw_decode_obj_1.set_surfcae(c2_reader_Surfcae_1);
+                c2_reader_player_1.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                    public void onPrepared(MediaPlayer mp) {
+                        c2_reader_player_1.start();
+                        LogUtil.log("【CS】c2_reader_player_1 已启动播放");
+                    }
+                });
                 android.os.ParcelFileDescriptor pfd = getVideoPFD();
                 if (pfd != null) {
-                    c2_hw_decode_obj_1.reset(pfd);
+                    c2_reader_player_1.setDataSource(pfd.getFileDescriptor());
+                    pfd.close();
                 } else {
-                    c2_hw_decode_obj_1.reset(getCurrentVideoPath());
+                    c2_reader_player_1.setDataSource(getCurrentVideoPath());
                 }
-            } catch (Throwable throwable) {
-                LogUtil.log("【CS】" + throwable);
+                c2_reader_player_1.prepare();
+            } catch (Exception e) {
+                LogUtil.log("【CS】[c2_reader_player_1]" + e);
             }
         }
-
 
         if (c2_preview_Surfcae != null) {
             if (c2_player == null) {
@@ -450,7 +549,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_player.release();
                 c2_player = new MediaPlayer();
             }
-            c2_player.setSurface(c2_preview_Surfcae);
+            GLVideoRenderer.releaseSafely(c2_renderer);
+            c2_renderer = setupPlayerWithRenderer(c2_player, c2_preview_Surfcae, "c2_preview");
             boolean playSound = getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
             if (!playSound) {
                 c2_player.setVolume(0, 0);
@@ -483,7 +583,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_player_1.release();
                 c2_player_1 = new MediaPlayer();
             }
-            c2_player_1.setSurface(c2_preview_Surfcae_1);
+            GLVideoRenderer.releaseSafely(c2_renderer_1);
+            c2_renderer_1 = setupPlayerWithRenderer(c2_player_1, c2_preview_Surfcae_1, "c2_preview_1");
             boolean playSound = getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
             if (!playSound) {
                 c2_player_1.setVolume(0, 0);
@@ -541,19 +642,36 @@ public class HookMain implements IXposedHookLoadPackage {
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 need_recreate = true;
                 create_virtual_surface();
+                // 释放 Camera2 相关的 GL 渲染器
+                GLVideoRenderer.releaseSafely(c2_renderer);
+                c2_renderer = null;
+                GLVideoRenderer.releaseSafely(c2_renderer_1);
+                c2_renderer_1 = null;
+                GLVideoRenderer.releaseSafely(c2_reader_renderer);
+                c2_reader_renderer = null;
+                GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
+                c2_reader_renderer_1 = null;
                 if (c2_player != null) {
                     c2_player.stop();
                     c2_player.reset();
                     c2_player.release();
                     c2_player = null;
                 }
-                if (c2_hw_decode_obj_1 != null) {
-                    c2_hw_decode_obj_1.stopDecode();
-                    c2_hw_decode_obj_1 = null;
+                if (c2_reader_player_1 != null) {
+                    try {
+                        c2_reader_player_1.stop();
+                    } catch (Exception ignored) {
+                    }
+                    c2_reader_player_1.release();
+                    c2_reader_player_1 = null;
                 }
-                if (c2_hw_decode_obj != null) {
-                    c2_hw_decode_obj.stopDecode();
-                    c2_hw_decode_obj = null;
+                if (c2_reader_player != null) {
+                    try {
+                        c2_reader_player.stop();
+                    } catch (Exception ignored) {
+                    }
+                    c2_reader_player.release();
+                    c2_reader_player = null;
                 }
                 if (c2_player_1 != null) {
                     c2_player_1.stop();
@@ -580,111 +698,121 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
                     return;
                 }
-                XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createCaptureSession", List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
-                        if (paramd.args[0] != null) {
-                            LogUtil.log("【CS】createCaptureSession创建捕获，原始:" + paramd.args[0].toString() + "虚拟：" + c2_virtual_surface.toString());
-                            paramd.args[0] = Arrays.asList(c2_virtual_surface);
-                            if (paramd.args[1] != null) {
-                                process_camera2Session_callback((CameraCaptureSession.StateCallback) paramd.args[1]);
+                XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createCaptureSession", List.class,
+                        CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
+                                if (paramd.args[0] != null) {
+                                    LogUtil.log("【CS】createCaptureSession创建捕获，原始:" + paramd.args[0].toString() + "虚拟："
+                                            + c2_virtual_surface.toString());
+                                    paramd.args[0] = Arrays.asList(c2_virtual_surface);
+                                    if (paramd.args[1] != null) {
+                                        process_camera2Session_callback(
+                                                (CameraCaptureSession.StateCallback) paramd.args[1]);
+                                    }
+                                }
                             }
-                        }
-                    }
-                });
-
-
+                        });
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createCaptureSessionByOutputConfigurations", List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            super.beforeHookedMethod(param);
-                            if (param.args[0] != null) {
-                                outputConfiguration = new OutputConfiguration(c2_virtual_surface);
-                                param.args[0] = Arrays.asList(outputConfiguration);
+                    XposedHelpers.findAndHookMethod(param.args[0].getClass(),
+                            "createCaptureSessionByOutputConfigurations", List.class,
+                            CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    super.beforeHookedMethod(param);
+                                    if (param.args[0] != null) {
+                                        outputConfiguration = new OutputConfiguration(c2_virtual_surface);
+                                        param.args[0] = Arrays.asList(outputConfiguration);
 
-                                LogUtil.log("【CS】执行了createCaptureSessionByOutputConfigurations");
-                                if (param.args[1] != null) {
-                                    process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[1]);
+                                        LogUtil.log("【CS】执行了createCaptureSessionByOutputConfigurations");
+                                        if (param.args[1] != null) {
+                                            process_camera2Session_callback(
+                                                    (CameraCaptureSession.StateCallback) param.args[1]);
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                    });
+                            });
                 }
 
-
-                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createConstrainedHighSpeedCaptureSession", List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            super.beforeHookedMethod(param);
-                            if (param.args[0] != null) {
-                                param.args[0] = Arrays.asList(c2_virtual_surface);
-                                LogUtil.log("【CS】执行了 createConstrainedHighSpeedCaptureSession");
-                                if (param.args[1] != null) {
-                                    process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[1]);
+                XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createConstrainedHighSpeedCaptureSession",
+                        List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                super.beforeHookedMethod(param);
+                                if (param.args[0] != null) {
+                                    param.args[0] = Arrays.asList(c2_virtual_surface);
+                                    LogUtil.log("【CS】执行了 createConstrainedHighSpeedCaptureSession");
+                                    if (param.args[1] != null) {
+                                        process_camera2Session_callback(
+                                                (CameraCaptureSession.StateCallback) param.args[1]);
+                                    }
                                 }
                             }
-                        }
-                    });
-
+                        });
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createReprocessableCaptureSession", InputConfiguration.class, List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            super.beforeHookedMethod(param);
-                            if (param.args[1] != null) {
-                                param.args[1] = Arrays.asList(c2_virtual_surface);
-                                LogUtil.log("【CS】执行了 createReprocessableCaptureSession ");
-                                if (param.args[2] != null) {
-                                    process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[2]);
+                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createReprocessableCaptureSession",
+                            InputConfiguration.class, List.class, CameraCaptureSession.StateCallback.class,
+                            Handler.class, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    super.beforeHookedMethod(param);
+                                    if (param.args[1] != null) {
+                                        param.args[1] = Arrays.asList(c2_virtual_surface);
+                                        LogUtil.log("【CS】执行了 createReprocessableCaptureSession ");
+                                        if (param.args[2] != null) {
+                                            process_camera2Session_callback(
+                                                    (CameraCaptureSession.StateCallback) param.args[2]);
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                    });
+                            });
                 }
 
-
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createReprocessableCaptureSessionByConfigurations", InputConfiguration.class, List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            super.beforeHookedMethod(param);
-                            if (param.args[1] != null) {
-                                outputConfiguration = new OutputConfiguration(c2_virtual_surface);
-                                param.args[0] = Arrays.asList(outputConfiguration);
-                                LogUtil.log("【CS】执行了 createReprocessableCaptureSessionByConfigurations");
-                                if (param.args[2] != null) {
-                                    process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[2]);
+                    XposedHelpers.findAndHookMethod(param.args[0].getClass(),
+                            "createReprocessableCaptureSessionByConfigurations", InputConfiguration.class, List.class,
+                            CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    super.beforeHookedMethod(param);
+                                    if (param.args[1] != null) {
+                                        outputConfiguration = new OutputConfiguration(c2_virtual_surface);
+                                        param.args[0] = Arrays.asList(outputConfiguration);
+                                        LogUtil.log("【CS】执行了 createReprocessableCaptureSessionByConfigurations");
+                                        if (param.args[2] != null) {
+                                            process_camera2Session_callback(
+                                                    (CameraCaptureSession.StateCallback) param.args[2]);
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                    });
+                            });
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createCaptureSession", SessionConfiguration.class, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            super.beforeHookedMethod(param);
-                            if (param.args[0] != null) {
-                                LogUtil.log("【CS】执行了 createCaptureSession (SessionConfiguration)");
-                                sessionConfiguration = (SessionConfiguration) param.args[0];
-                                outputConfiguration = new OutputConfiguration(c2_virtual_surface);
-                                fake_sessionConfiguration = new SessionConfiguration(sessionConfiguration.getSessionType(),
-                                        Arrays.asList(outputConfiguration),
-                                        sessionConfiguration.getExecutor(),
-                                        sessionConfiguration.getStateCallback());
-                                param.args[0] = fake_sessionConfiguration;
-                                process_camera2Session_callback(sessionConfiguration.getStateCallback());
-                            }
-                        }
-                    });
+                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createCaptureSession",
+                            SessionConfiguration.class, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    super.beforeHookedMethod(param);
+                                    if (param.args[0] != null) {
+                                        LogUtil.log("【CS】执行了 createCaptureSession (SessionConfiguration)");
+                                        sessionConfiguration = (SessionConfiguration) param.args[0];
+                                        outputConfiguration = new OutputConfiguration(c2_virtual_surface);
+                                        fake_sessionConfiguration = new SessionConfiguration(
+                                                sessionConfiguration.getSessionType(),
+                                                Arrays.asList(outputConfiguration),
+                                                sessionConfiguration.getExecutor(),
+                                                sessionConfiguration.getStateCallback());
+                                        param.args[0] = fake_sessionConfiguration;
+                                        process_camera2Session_callback(sessionConfiguration.getStateCallback());
+                                    }
+                                }
+                            });
                 }
             }
         });
-
 
         XposedHelpers.findAndHookMethod(hooked_class, "onError", CameraDevice.class, int.class, new XC_MethodHook() {
             @Override
@@ -694,7 +822,6 @@ public class HookMain implements IXposedHookLoadPackage {
 
         });
 
-
         XposedHelpers.findAndHookMethod(hooked_class, "onDisconnected", CameraDevice.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -702,7 +829,6 @@ public class HookMain implements IXposedHookLoadPackage {
             }
 
         });
-
 
     }
 
@@ -717,41 +843,43 @@ public class HookMain implements IXposedHookLoadPackage {
         }
         Class callback = param.args[index].getClass();
 
-        XposedHelpers.findAndHookMethod(callback, "onPictureTaken", byte[].class, android.hardware.Camera.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
-                try {
-                    Camera loaclcam = (Camera) paramd.args[1];
-                    onemwidth = loaclcam.getParameters().getPreviewSize().width;
-                    onemhight = loaclcam.getParameters().getPreviewSize().height;
-                    LogUtil.log("【CS】JPEG拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
-                    need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
-                    if (toast_content != null && need_to_show_toast) {
+        XposedHelpers.findAndHookMethod(callback, "onPictureTaken", byte[].class, android.hardware.Camera.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
                         try {
-                            showToast("发现拍照\n宽：" + onemwidth + "\n高：" + onemhight + "\n格式：JPEG");
-                        } catch (Exception e) {
-                            LogUtil.log("【CS】[toast]" + e.toString());
+                            Camera loaclcam = (Camera) paramd.args[1];
+                            onemwidth = loaclcam.getParameters().getPreviewSize().width;
+                            onemhight = loaclcam.getParameters().getPreviewSize().height;
+                            LogUtil.log("【CS】JPEG拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类："
+                                    + loaclcam.toString());
+                            need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
+                            if (toast_content != null && need_to_show_toast) {
+                                try {
+                                    showToast("发现拍照\n宽：" + onemwidth + "\n高：" + onemhight + "\n格式：JPEG");
+                                } catch (Exception e) {
+                                    LogUtil.log("【CS】[toast]" + e.toString());
+                                }
+                            }
+                            if (getConfig().getBoolean(ConfigManager.KEY_DISABLE_MODULE, false)) {
+                                return;
+                            }
+
+                            File replacementFile = VideoManager.pickRandomImageFile();
+                            if (replacementFile == null) {
+                                LogUtil.log("【CS】未找到用于替换的BMP文件");
+                                return;
+                            }
+                            Bitmap pict = ImageUtils.getBMP(replacementFile.getAbsolutePath());
+                            ByteArrayOutputStream temp_array = new ByteArrayOutputStream();
+                            pict.compress(Bitmap.CompressFormat.JPEG, 100, temp_array);
+                            byte[] jpeg_data = temp_array.toByteArray();
+                            paramd.args[0] = jpeg_data;
+                        } catch (Exception ee) {
+                            LogUtil.log("【CS】" + ee.toString());
                         }
                     }
-                    if (getConfig().getBoolean(ConfigManager.KEY_DISABLE_MODULE, false)) {
-                        return;
-                    }
-
-                    File replacementFile = VideoManager.pickRandomImageFile();
-                    if (replacementFile == null) {
-                        LogUtil.log("【CS】未找到用于替换的BMP文件");
-                        return;
-                    }
-                    Bitmap pict = ImageUtils.getBMP(replacementFile.getAbsolutePath());
-                    ByteArrayOutputStream temp_array = new ByteArrayOutputStream();
-                    pict.compress(Bitmap.CompressFormat.JPEG, 100, temp_array);
-                    byte[] jpeg_data = temp_array.toByteArray();
-                    paramd.args[0] = jpeg_data;
-                } catch (Exception ee) {
-                    LogUtil.log("【CS】" + ee.toString());
-                }
-            }
-        });
+                });
     }
 
     public static void process_a_shot_YUV(XC_MethodHook.MethodHookParam param) {
@@ -761,37 +889,39 @@ public class HookMain implements IXposedHookLoadPackage {
             LogUtil.log("【CS】" + eee);
         }
         Class callback = param.args[1].getClass();
-        XposedHelpers.findAndHookMethod(callback, "onPictureTaken", byte[].class, android.hardware.Camera.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
-                try {
-                    Camera loaclcam = (Camera) paramd.args[1];
-                    onemwidth = loaclcam.getParameters().getPreviewSize().width;
-                    onemhight = loaclcam.getParameters().getPreviewSize().height;
-                    LogUtil.log("【CS】YUV拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
-                    need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
-                    if (toast_content != null && need_to_show_toast) {
+        XposedHelpers.findAndHookMethod(callback, "onPictureTaken", byte[].class, android.hardware.Camera.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
                         try {
-                            showToast("发现拍照\n宽：" + onemwidth + "\n高：" + onemhight + "\n格式：YUV_420_888");
+                            Camera loaclcam = (Camera) paramd.args[1];
+                            onemwidth = loaclcam.getParameters().getPreviewSize().width;
+                            onemhight = loaclcam.getParameters().getPreviewSize().height;
+                            LogUtil.log(
+                                    "【CS】YUV拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
+                            need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
+                            if (toast_content != null && need_to_show_toast) {
+                                try {
+                                    showToast("发现拍照\n宽：" + onemwidth + "\n高：" + onemhight + "\n格式：YUV_420_888");
+                                } catch (Exception ee) {
+                                    LogUtil.log("【CS】[toast]" + ee.toString());
+                                }
+                            }
+                            if (getConfig().getBoolean(ConfigManager.KEY_DISABLE_MODULE, false)) {
+                                return;
+                            }
+                            File replacementFile = VideoManager.pickRandomImageFile();
+                            if (replacementFile == null) {
+                                LogUtil.log("【CS】未找到用于替换的BMP文件");
+                                return;
+                            }
+                            input = ImageUtils.getYUVByBitmap(ImageUtils.getBMP(replacementFile.getAbsolutePath()));
+                            paramd.args[0] = input;
                         } catch (Exception ee) {
-                            LogUtil.log("【CS】[toast]" + ee.toString());
+                            LogUtil.log("【CS】" + ee.toString());
                         }
                     }
-                    if (getConfig().getBoolean(ConfigManager.KEY_DISABLE_MODULE, false)) {
-                        return;
-                    }
-                    File replacementFile = VideoManager.pickRandomImageFile();
-                    if (replacementFile == null) {
-                        LogUtil.log("【CS】未找到用于替换的BMP文件");
-                        return;
-                    }
-                    input = ImageUtils.getYUVByBitmap(ImageUtils.getBMP(replacementFile.getAbsolutePath()));
-                    paramd.args[0] = input;
-                } catch (Exception ee) {
-                    LogUtil.log("【CS】" + ee.toString());
-                }
-            }
-        });
+                });
     }
 
     public static void process_callback(XC_MethodHook.MethodHookParam param) {
@@ -813,83 +943,97 @@ public class HookMain implements IXposedHookLoadPackage {
             need_stop = 1;
         }
         int finalNeed_stop = need_stop;
-        XposedHelpers.findAndHookMethod(preview_cb_class, "onPreviewFrame", byte[].class, android.hardware.Camera.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
-                Camera localcam = (android.hardware.Camera) paramd.args[1];
-                if (localcam.equals(camera_onPreviewFrame)) {
-                    for (int _w = 0; _w < 100 && data_buffer == null; _w++) {
-                        try { Thread.sleep(10); } catch (InterruptedException ignored) { break; }
-                    }
-                    if (data_buffer == null) return;
-                    System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
-                } else {
-                    camera_callback_calss = preview_cb_class;
-                    camera_onPreviewFrame = (android.hardware.Camera) paramd.args[1];
-                    mwidth = camera_onPreviewFrame.getParameters().getPreviewSize().width;
-                    mhight = camera_onPreviewFrame.getParameters().getPreviewSize().height;
-                    int frame_Rate = camera_onPreviewFrame.getParameters().getPreviewFrameRate();
-                    LogUtil.log("【CS】帧预览回调初始化：宽：" + mwidth + " 高：" + mhight + " 帧率：" + frame_Rate);
-                    need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
-                    if (toast_content != null && need_to_show_toast) {
-                        try {
-                            showToast("发现预览\n宽：" + mwidth + "\n高：" + mhight + "\n" + "需要视频分辨率与其完全相同");
-                        } catch (Exception ee) {
-                            LogUtil.log("【CS】[toast]" + ee.toString());
+        XposedHelpers.findAndHookMethod(preview_cb_class, "onPreviewFrame", byte[].class, android.hardware.Camera.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
+                        Camera localcam = (android.hardware.Camera) paramd.args[1];
+                        if (localcam.equals(camera_onPreviewFrame)) {
+                            for (int _w = 0; _w < 100 && data_buffer == null; _w++) {
+                                try {
+                                    Thread.sleep(10);
+                                } catch (InterruptedException ignored) {
+                                    break;
+                                }
+                            }
+                            if (data_buffer == null)
+                                return;
+                            System.arraycopy(data_buffer, 0, paramd.args[0], 0,
+                                    Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
+                        } else {
+                            camera_callback_calss = preview_cb_class;
+                            camera_onPreviewFrame = (android.hardware.Camera) paramd.args[1];
+                            mwidth = camera_onPreviewFrame.getParameters().getPreviewSize().width;
+                            mhight = camera_onPreviewFrame.getParameters().getPreviewSize().height;
+                            int frame_Rate = camera_onPreviewFrame.getParameters().getPreviewFrameRate();
+                            LogUtil.log("【CS】帧预览回调初始化：宽：" + mwidth + " 高：" + mhight + " 帧率：" + frame_Rate);
+                            need_to_show_toast = !getConfig().getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
+                            if (toast_content != null && need_to_show_toast) {
+                                try {
+                                    showToast("发现预览\n宽：" + mwidth + "\n高：" + mhight + "\n" + "需要视频分辨率与其完全相同");
+                                } catch (Exception ee) {
+                                    LogUtil.log("【CS】[toast]" + ee.toString());
+                                }
+                            }
+                            if (finalNeed_stop == 1) {
+                                return;
+                            }
+                            if (hw_decode_obj == null) {
+                                hw_decode_obj = new VideoToFrames();
+                            }
+                            hw_decode_obj.setSaveFrames("", OutputImageFormat.NV21);
+                            try {
+                                hw_decode_obj.reset(getCurrentVideoPath());
+                            } catch (Throwable t) {
+                                LogUtil.log("【CS】" + t);
+                            }
+                            for (int _w = 0; _w < 100 && data_buffer == null; _w++) {
+                                try {
+                                    Thread.sleep(10);
+                                } catch (InterruptedException ignored) {
+                                    break;
+                                }
+                            }
+                            if (data_buffer == null)
+                                return;
+                            System.arraycopy(data_buffer, 0, paramd.args[0], 0,
+                                    Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
                         }
-                    }
-                    if (finalNeed_stop == 1) {
-                        return;
-                    }
-                    if (hw_decode_obj == null) {
-                        hw_decode_obj = new VideoToFrames();
-                    }
-                    hw_decode_obj.setSaveFrames("", OutputImageFormat.NV21);
-                    try {
-                        hw_decode_obj.reset(getCurrentVideoPath());
-                    } catch (Throwable t) {
-                        LogUtil.log("【CS】" + t);
-                    }
-                    for (int _w = 0; _w < 100 && data_buffer == null; _w++) {
-                        try { Thread.sleep(10); } catch (InterruptedException ignored) { break; }
-                    }
-                    if (data_buffer == null) return;
-                    System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
-                }
 
-            }
-        });
+                    }
+                });
 
     }
 
-    private static void process_camera2Session_callback(CameraCaptureSession.StateCallback callback_calss){
-        if (callback_calss == null){
+    private static void process_camera2Session_callback(CameraCaptureSession.StateCallback callback_calss) {
+        if (callback_calss == null) {
             return;
         }
-        XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onConfigureFailed", CameraCaptureSession.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                LogUtil.log("【CS】onConfigureFailed ：" + param.args[0].toString());
-            }
+        XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onConfigureFailed", CameraCaptureSession.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        LogUtil.log("【CS】onConfigureFailed ：" + param.args[0].toString());
+                    }
 
-        });
+                });
 
-        XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onConfigured", CameraCaptureSession.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                LogUtil.log("【CS】onConfigured ：" + param.args[0].toString());
-            }
-        });
+        XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onConfigured", CameraCaptureSession.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        LogUtil.log("【CS】onConfigured ：" + param.args[0].toString());
+                    }
+                });
 
-        XposedHelpers.findAndHookMethod( callback_calss.getClass(), "onClosed", CameraCaptureSession.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                LogUtil.log("【CS】onClosed ："+ param.args[0].toString());
-            }
-        });
+        XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onClosed", CameraCaptureSession.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        LogUtil.log("【CS】onClosed ：" + param.args[0].toString());
+                    }
+                });
     }
-
-
 
     public static void showToast(final String message) {
         PermissionHelper.showToast(toast_content, message);

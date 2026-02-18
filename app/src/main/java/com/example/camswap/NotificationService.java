@@ -20,6 +20,10 @@ public class NotificationService extends Service {
 
     private static final String ACTION_NEXT = "com.example.camswap.ACTION_CAMSWAP_NEXT";
     private static final String ACTION_EXIT = "com.example.camswap.ACTION_CAMSWAP_EXIT";
+    private static final String ACTION_ROTATE = "com.example.camswap.ACTION_CAMSWAP_ROTATE";
+
+    private ConfigManager configManager;
+    private int currentRotationOffset = 0;
 
     private BroadcastReceiver controlReceiver = new BroadcastReceiver() {
         @Override
@@ -28,6 +32,18 @@ public class NotificationService extends Service {
             android.util.Log.d("Camswap_NOTIF", "收到操作指令: " + action);
             if (ACTION_EXIT.equals(action)) {
                 stopSelf();
+            } else if (ACTION_ROTATE.equals(action)) {
+                // 循环切换旋转偏移: 0 -> 90 -> 180 -> 270 -> 0
+                currentRotationOffset = (currentRotationOffset + 90) % 360;
+                if (configManager != null) {
+                    configManager.setInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, currentRotationOffset);
+                }
+                // 更新通知显示
+                NotificationManager nm = getSystemService(NotificationManager.class);
+                if (nm != null) {
+                    nm.notify(NOTIFICATION_ID, buildNotification());
+                }
+                android.util.Log.d("Camswap_NOTIF", "旋转偏移已切换为: " + currentRotationOffset + "°");
             }
         }
     };
@@ -36,11 +52,15 @@ public class NotificationService extends Service {
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
-        
+
+        configManager = new ConfigManager();
+        configManager.setContext(this);
+        currentRotationOffset = configManager.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+
         IntentFilter filter = new IntentFilter();
-        // Only register ACTION_EXIT. ACTION_NEXT is handled directly via PendingIntent → Provider.
         filter.addAction(ACTION_EXIT);
-        
+        filter.addAction(ACTION_ROTATE);
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(controlReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
@@ -51,10 +71,10 @@ public class NotificationService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (Build.VERSION.SDK_INT >= 34) {
-             startForeground(NOTIFICATION_ID, buildNotification(), 
-                 android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            startForeground(NOTIFICATION_ID, buildNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
         } else {
-             startForeground(NOTIFICATION_ID, buildNotification());
+            startForeground(NOTIFICATION_ID, buildNotification());
         }
         return START_STICKY;
     }
@@ -72,15 +92,17 @@ public class NotificationService extends Service {
 
     private Notification buildNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent,
                 PendingIntent.FLAG_IMMUTABLE);
 
         // 使用 Notification.Action 添加按钮 (简单样式)
         // 也可以使用 RemoteViews 做更复杂的布局，这里为了兼容性使用 Action
-        
+
+        String rotationLabel = "旋转:" + currentRotationOffset + "°";
+
         Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Camswap")
-                .setContentText("点击按钮切换视频")
+                .setContentText("旋转偏移: " + currentRotationOffset + "°")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true);
@@ -88,11 +110,15 @@ public class NotificationService extends Service {
         // 添加操作按钮
         // 由于权限限制，无法准确传递复杂指令，仅保留“切换视频”作为核心功能
         // 新增“下一条”按钮，点击后发送切换指令
-        // "下一条" button directly calls Provider via PendingIntent to avoid broadcast self-loop
-        builder.addAction(new Notification.Action.Builder(null, "下一条", 
+        // "下一条" button directly calls Provider via PendingIntent to avoid broadcast
+        // self-loop
+        builder.addAction(new Notification.Action.Builder(null, "下一条",
                 getNextPendingIntent()).build());
-                
-        builder.addAction(new Notification.Action.Builder(null, "退出", 
+
+        builder.addAction(new Notification.Action.Builder(null, rotationLabel,
+                getRotatePendingIntent()).build());
+
+        builder.addAction(new Notification.Action.Builder(null, "退出",
                 getPendingIntent(ACTION_EXIT)).build());
 
         return builder.build();
@@ -101,7 +127,7 @@ public class NotificationService extends Service {
     private PendingIntent getPendingIntent(String action) {
         Intent intent = new Intent(action);
         intent.setPackage(getPackageName());
-        return PendingIntent.getBroadcast(this, action.hashCode(), intent, 
+        return PendingIntent.getBroadcast(this, action.hashCode(), intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
@@ -117,17 +143,26 @@ public class NotificationService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    /**
+     * 旋转广播也用全局广播，让 Hook 进程能接收并 forceReload 配置。
+     */
+    private PendingIntent getRotatePendingIntent() {
+        Intent intent = new Intent(ACTION_ROTATE);
+        // 不限制 package，让 NotificationService 自身和 Hook 进程都能收到
+        return PendingIntent.getBroadcast(this, ACTION_ROTATE.hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
                     "Camswap控制服务",
-                    NotificationManager.IMPORTANCE_LOW
-            );
+                    NotificationManager.IMPORTANCE_LOW);
             channel.setDescription("显示Camswap视频切换控制");
             channel.enableLights(false);
             channel.enableVibration(false);
-            
+
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
