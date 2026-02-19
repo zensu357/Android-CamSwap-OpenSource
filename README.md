@@ -11,6 +11,7 @@ Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能�
 *   **无缝替换**：
     *   🎥 **视频替换预览**：将相机预览画面替换为指定的 MP4 视频。
     *   📸 **图片替换拍照**：将拍照结果替换为指定的 BMP/JPG 图片。
+    *   🎤 **音频替换播放**：播放自定义的mp3音频文件。
 *   **跨进程兼容**：使用 ContentProvider 分发数据，目标应用无需申请存储权限即可读取虚拟视频流。
 *   **实时控制**：
     *   支持通过通知栏快捷切换下一个视频。
@@ -104,7 +105,7 @@ keyPassword=your_key_password
 ## ❤️ 支持
 
 请点Star以示支持，感谢你的支持。
-![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=202602)
+![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=20260219)
 
 
 ## 📄 许可证
