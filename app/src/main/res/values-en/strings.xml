@@ -97,6 +97,13 @@
     <string name="language_en">English</string>
     <string name="language_zh">中文</string>
 
+    <!-- Replace Mode -->
+    <string name="settings_replace_mode">Replace Mode</string>
+    <string name="replace_mode_video">Video Mode</string>
+    <string name="replace_mode_video_desc">Use video to replace camera preview and capture</string>
+    <string name="replace_mode_image">Image Mode</string>
+    <string name="replace_mode_image_desc">Use static image to replace camera preview and capture</string>
+
     <!-- Notification Service -->
     <string name="notif_rotate_label">Rotate:</string>
     <string name="notif_rotate_offset">Rotation Offset: </string>
@@ -116,6 +123,10 @@
     <string name="status_grant_permission">Grant Permission</string>
     <string name="status_add_video_hint">Please add videos in the Manage tab</string>
     <string name="status_select_video_hint">Please select a video in the Manage tab</string>
+    <string name="status_no_image">No Image Added</string>
+    <string name="status_no_image_selection">No Image Selected</string>
+    <string name="status_add_image_hint">Please add images in the Image tab of Manage</string>
+    <string name="status_select_image_hint">Please select an image in the Image tab of Manage</string>
 
     <!-- Home Screen - Support Card -->
     <string name="support_title">Support</string>

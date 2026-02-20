@@ -158,6 +158,13 @@ public class HookMain implements IXposedHookLoadPackage {
                 } catch (Exception e) {
                     LogUtil.log("【CS】FileObserver 启动失败: " + e);
                 }
+
+                // Active Config Request: Provider 不可用时，主动向主 App 请求配置
+                // 解决冷启动时无配置且无文件权限的问题
+                LogUtil.log("【CS】主动请求配置广播...");
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    VideoManager.getConfig().requestConfig(context);
+                }, 1000); // 延迟 1 秒确保接收器已注册
             }
 
             // Also register BroadcastReceiver for control signals (e.g. from Notification)
@@ -169,7 +176,84 @@ public class HookMain implements IXposedHookLoadPackage {
                     public void onReceive(Context context, Intent intent) {
                         String action = intent.getAction();
                         LogUtil.log("【CS】收到广播指令: " + action);
-                        if ("com.example.camswap.ACTION_CAMSWAP_NEXT".equals(action)) {
+                        if (ConfigManager.ACTION_UPDATE_CONFIG.equals(action)) {
+                            String configJson = intent.getStringExtra(ConfigManager.EXTRA_CONFIG_JSON);
+                            if (configJson != null) {
+                                // Backup old crucial values before updating
+                                String oldVideo = getConfig().getString(ConfigManager.KEY_SELECTED_VIDEO, "");
+                                String oldImage = getConfig().getString(ConfigManager.KEY_SELECTED_IMAGE, "");
+                                String oldMode = getConfig().getString("replace_mode", "video");
+                                boolean oldFpd = getConfig().getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false);
+                                int oldRotation = getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+
+                                getConfig().updateConfigFromJSON(configJson);
+
+                                // Check what actually changed
+                                String newVideo = getConfig().getString(ConfigManager.KEY_SELECTED_VIDEO, "");
+                                String newImage = getConfig().getString(ConfigManager.KEY_SELECTED_IMAGE, "");
+                                String newMode = getConfig().getString("replace_mode", "video");
+                                boolean newFpd = getConfig().getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false);
+                                int newRotation = getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+
+                                boolean mediaChanged = !oldVideo.equals(newVideo) ||
+                                        !oldImage.equals(newImage) ||
+                                        !oldMode.equals(newMode) ||
+                                        (oldFpd != newFpd);
+
+                                if (mediaChanged) {
+                                    if (getConfig().getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false)) {
+                                        android.os.Bundle bundle = intent.getBundleExtra("video_bundle");
+                                        if (bundle != null) {
+                                            LogUtil.log("【CS】成功获取到 video_bundle");
+                                            android.os.IBinder binder = bundle.getBinder("video_binder");
+                                            if (binder != null) {
+                                                LogUtil.log("【CS】提取到 video_binder，开始 transact");
+                                                android.os.Parcel data = android.os.Parcel.obtain();
+                                                android.os.Parcel reply = android.os.Parcel.obtain();
+                                                try {
+                                                    boolean success = binder.transact(1, data, reply, 0);
+                                                    LogUtil.log("【CS】transact 结果: " + success);
+                                                    reply.readException();
+                                                    int hasFd = reply.readInt();
+                                                    LogUtil.log("【CS】reply 中有无 Fd 标志: " + hasFd);
+                                                    if (hasFd != 0) {
+                                                        android.os.ParcelFileDescriptor pfd = android.os.ParcelFileDescriptor.CREATOR
+                                                                .createFromParcel(reply);
+                                                        if (pfd != null) {
+                                                            LogUtil.log("【CS】成功利用 FD 调用 copyToPrivateDir");
+                                                            VideoManager.copyToPrivateDir(pfd);
+                                                            pfd.close();
+                                                        } else {
+                                                            LogUtil.log("【CS】创建 PFD 失败: null");
+                                                        }
+                                                    }
+                                                } catch (Exception e) {
+                                                    LogUtil.log("【CS】从 Binder 获取 FD 失败: " + e);
+                                                } finally {
+                                                    data.recycle();
+                                                    reply.recycle();
+                                                }
+                                            } else {
+                                                LogUtil.log("【CS】bundle.getBinder 返回 null");
+                                            }
+                                        } else {
+                                            LogUtil.log("【CS】并没有找到 video_bundle 额外数据");
+                                        }
+                                    }
+
+                                    VideoManager.updateVideoPath(false);
+                                    restartDecoders();
+                                    LogUtil.log("【CS】收到配置更新且媒体源发生变化，已应用并重启播放器");
+                                } else {
+                                    if (oldRotation != newRotation) {
+                                        LogUtil.log("【CS】收到配置更新，仅旋转偏移变更: " + newRotation + "°");
+                                        updateAllRendererRotations(newRotation);
+                                    } else {
+                                        LogUtil.log("【CS】收到配置更新，核心媒体参数无变化，忽略重启");
+                                    }
+                                }
+                            }
+                        } else if ("com.example.camswap.ACTION_CAMSWAP_NEXT".equals(action)) {
                             // Provider 不可用时，直接走本地文件切换
                             if (!VideoManager.isProviderAvailable()) {
                                 VideoManager.switchVideo(true);
@@ -188,6 +272,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
                 };
                 IntentFilter filter = new IntentFilter();
+                filter.addAction(ConfigManager.ACTION_UPDATE_CONFIG);
                 filter.addAction("com.example.camswap.ACTION_CAMSWAP_NEXT");
                 filter.addAction("com.example.camswap.ACTION_CAMSWAP_ROTATE");
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -249,7 +334,7 @@ public class HookMain implements IXposedHookLoadPackage {
             player.prepare();
             player.start();
         } catch (Exception e) {
-            LogUtil.log("【CS】重启 " + tag + " 失败: " + e);
+            LogUtil.log("【CS】重启 " + tag + " 失败: " + android.util.Log.getStackTraceString(e));
         }
     }
 
@@ -322,7 +407,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 decoder.reset(VideoManager.getCurrentVideoPath());
             }
         } catch (Throwable t) {
-            LogUtil.log("【CS】重启 " + tag + " 失败: " + t);
+            LogUtil.log("【CS】重启 " + tag + " 失败: " + android.util.Log.getStackTraceString(t));
         }
     }
 
@@ -477,138 +562,156 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     public static void process_camera2_play() {
+        process_camera2_play_video();
+    }
 
-        // Camera2 reader 路径：MediaPlayer + GL 旋转渲染器
-        if (c2_reader_Surfcae != null) {
-            if (c2_reader_player == null) {
-                c2_reader_player = new MediaPlayer();
+    /**
+     * Helper to setup MediaPlayer reliably, isolating EGL/Surface issues.
+     */
+    private static void setupMediaPlayer(MediaPlayer player, GLVideoRenderer[] rendererRef, SurfaceRelay[] relayRef,
+            Surface targetSurface,
+            String tag, boolean playSound) {
+        if (targetSurface == null)
+            return;
+
+        GLVideoRenderer.releaseSafely(rendererRef[0]);
+        SurfaceRelay.releaseSafely(relayRef[0]);
+        int rotation = getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+
+        // 1. Try GL Renderer setup
+        rendererRef[0] = GLVideoRenderer.createSafely(targetSurface, tag);
+
+        if (!playSound) {
+            player.setVolume(0, 0);
+        }
+        player.setLooping(true);
+
+        try {
+            // 2. Setup Data Source
+            android.os.ParcelFileDescriptor pfd = getVideoPFD();
+            if (pfd != null) {
+                player.setDataSource(pfd.getFileDescriptor());
+                // We MUST not close the PFD before prepare() is finished!
+                // However, setDataSource(FD) usually duplicates it or consumes it
+                // synchronously.
+                // Just in case, we will close it immediately as standard Android docs allow,
+                // but if this still fails, we'll know it's the Surface.
+                pfd.close();
             } else {
+                player.setDataSource(getCurrentVideoPath());
+            }
+
+            // 3. Prepare FIRST, before setting the potentially problematic targetSurface!
+            // If prepare() fails here, it's 100% the video file/FD.
+            player.prepare();
+
+            // 4. Set Surface AFTER successful prepare()
+            if (rendererRef[0] != null) {
+                player.setSurface(rendererRef[0].getInputSurface());
+                rendererRef[0].setRotation(rotation);
+                LogUtil.log("【CS】【GL】" + tag + " 使用 GL 渲染器 (旋转:" + rotation + "°)");
+            } else {
+                // Tier 2 Fallback: SurfaceRelay
+                LogUtil.log("【CS】【Relay】" + tag + " GL 失败，尝试 SurfaceTexture 中继");
+                relayRef[0] = SurfaceRelay.createSafely(targetSurface, tag);
+
+                if (relayRef[0] != null) {
+                    player.setSurface(relayRef[0].getInputSurface());
+                    relayRef[0].setRotation(rotation);
+                    LogUtil.log("【CS】【Relay】" + tag + " 使用 Relay 渲染器 (旋转:" + rotation + "°)");
+                } else {
+                    // Tier 3: Direct Surface fallback (May still cause MediaServer to crash native
+                    // window)
+                    player.setSurface(targetSurface);
+                    LogUtil.log("【CS】" + tag + " 回退到直接 Surface（无旋转）");
+                }
+            }
+
+            player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                public void onPrepared(MediaPlayer mp) {
+                    player.start();
+                }
+            });
+            // Since prepare() is synchronous, we can start immediately:
+            player.start();
+            LogUtil.log("【CS】" + tag + " 已启动播放");
+
+        } catch (Exception e) {
+            LogUtil.log("【CS】[" + tag + "] 初始化播放器异常: " + android.util.Log.getStackTraceString(e));
+        }
+    }
+
+    public static SurfaceRelay c2_reader_relay;
+    public static SurfaceRelay c2_reader_relay_1;
+    public static SurfaceRelay c2_relay;
+    public static SurfaceRelay c2_relay_1;
+
+    /**
+     * 视频模式：原有的 MediaPlayer 路径（保持不变）。
+     */
+    private static void process_camera2_play_video() {
+        if (c2_reader_Surfcae != null) {
+            if (c2_reader_player == null)
+                c2_reader_player = new MediaPlayer();
+            else {
                 c2_reader_player.release();
                 c2_reader_player = new MediaPlayer();
             }
-            // 创建 GL 渲染器（失败则回退到直接 Surface）
-            GLVideoRenderer.releaseSafely(c2_reader_renderer);
-            c2_reader_renderer = setupPlayerWithRenderer(c2_reader_player, c2_reader_Surfcae, "c2_reader");
-            c2_reader_player.setVolume(0, 0);
-            c2_reader_player.setLooping(true);
-            try {
-                c2_reader_player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                    public void onPrepared(MediaPlayer mp) {
-                        c2_reader_player.start();
-                        LogUtil.log("【CS】c2_reader_player 已启动播放");
-                    }
-                });
-                android.os.ParcelFileDescriptor pfd = getVideoPFD();
-                if (pfd != null) {
-                    c2_reader_player.setDataSource(pfd.getFileDescriptor());
-                    pfd.close();
-                } else {
-                    c2_reader_player.setDataSource(getCurrentVideoPath());
-                }
-                c2_reader_player.prepare();
-            } catch (Exception e) {
-                LogUtil.log("【CS】[c2_reader_player]" + e);
-            }
+
+            GLVideoRenderer[] r = new GLVideoRenderer[] { c2_reader_renderer };
+            SurfaceRelay[] rr = new SurfaceRelay[] { c2_reader_relay };
+            setupMediaPlayer(c2_reader_player, r, rr, c2_reader_Surfcae, "c2_reader", false);
+            c2_reader_renderer = r[0];
+            c2_reader_relay = rr[0];
         }
 
         if (c2_reader_Surfcae_1 != null) {
-            if (c2_reader_player_1 == null) {
+            if (c2_reader_player_1 == null)
                 c2_reader_player_1 = new MediaPlayer();
-            } else {
+            else {
                 c2_reader_player_1.release();
                 c2_reader_player_1 = new MediaPlayer();
             }
-            GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
-            c2_reader_renderer_1 = setupPlayerWithRenderer(c2_reader_player_1, c2_reader_Surfcae_1, "c2_reader_1");
-            c2_reader_player_1.setVolume(0, 0);
-            c2_reader_player_1.setLooping(true);
-            try {
-                c2_reader_player_1.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                    public void onPrepared(MediaPlayer mp) {
-                        c2_reader_player_1.start();
-                        LogUtil.log("【CS】c2_reader_player_1 已启动播放");
-                    }
-                });
-                android.os.ParcelFileDescriptor pfd = getVideoPFD();
-                if (pfd != null) {
-                    c2_reader_player_1.setDataSource(pfd.getFileDescriptor());
-                    pfd.close();
-                } else {
-                    c2_reader_player_1.setDataSource(getCurrentVideoPath());
-                }
-                c2_reader_player_1.prepare();
-            } catch (Exception e) {
-                LogUtil.log("【CS】[c2_reader_player_1]" + e);
-            }
+
+            GLVideoRenderer[] r = new GLVideoRenderer[] { c2_reader_renderer_1 };
+            SurfaceRelay[] rr = new SurfaceRelay[] { c2_reader_relay_1 };
+            setupMediaPlayer(c2_reader_player_1, r, rr, c2_reader_Surfcae_1, "c2_reader_1", false);
+            c2_reader_renderer_1 = r[0];
+            c2_reader_relay_1 = rr[0];
         }
 
         if (c2_preview_Surfcae != null) {
-            if (c2_player == null) {
+            if (c2_player == null)
                 c2_player = new MediaPlayer();
-            } else {
+            else {
                 c2_player.release();
                 c2_player = new MediaPlayer();
             }
-            GLVideoRenderer.releaseSafely(c2_renderer);
-            c2_renderer = setupPlayerWithRenderer(c2_player, c2_preview_Surfcae, "c2_preview");
-            boolean playSound = getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
-            if (!playSound) {
-                c2_player.setVolume(0, 0);
-            }
-            c2_player.setLooping(true);
 
-            try {
-                c2_player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                    public void onPrepared(MediaPlayer mp) {
-                        c2_player.start();
-                    }
-                });
-                android.os.ParcelFileDescriptor pfd = getVideoPFD();
-                if (pfd != null) {
-                    c2_player.setDataSource(pfd.getFileDescriptor());
-                    pfd.close();
-                } else {
-                    c2_player.setDataSource(getCurrentVideoPath());
-                }
-                c2_player.prepare();
-            } catch (Exception e) {
-                LogUtil.log("【CS】[c2player][" + c2_preview_Surfcae.toString() + "]" + e);
-            }
+            boolean playSound = getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
+            GLVideoRenderer[] r = new GLVideoRenderer[] { c2_renderer };
+            SurfaceRelay[] rr = new SurfaceRelay[] { c2_relay };
+            setupMediaPlayer(c2_player, r, rr, c2_preview_Surfcae, "c2_preview", playSound);
+            c2_renderer = r[0];
+            c2_relay = rr[0];
         }
 
         if (c2_preview_Surfcae_1 != null) {
-            if (c2_player_1 == null) {
+            if (c2_player_1 == null)
                 c2_player_1 = new MediaPlayer();
-            } else {
+            else {
                 c2_player_1.release();
                 c2_player_1 = new MediaPlayer();
             }
-            GLVideoRenderer.releaseSafely(c2_renderer_1);
-            c2_renderer_1 = setupPlayerWithRenderer(c2_player_1, c2_preview_Surfcae_1, "c2_preview_1");
-            boolean playSound = getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
-            if (!playSound) {
-                c2_player_1.setVolume(0, 0);
-            }
-            c2_player_1.setLooping(true);
 
-            try {
-                c2_player_1.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                    public void onPrepared(MediaPlayer mp) {
-                        c2_player_1.start();
-                    }
-                });
-                android.os.ParcelFileDescriptor pfd = getVideoPFD();
-                if (pfd != null) {
-                    c2_player_1.setDataSource(pfd.getFileDescriptor());
-                    pfd.close();
-                } else {
-                    c2_player_1.setDataSource(getCurrentVideoPath());
-                }
-                c2_player_1.prepare();
-            } catch (Exception e) {
-                LogUtil.log("【CS】[c2player1]" + "[ " + c2_preview_Surfcae_1.toString() + "]" + e);
-            }
+            boolean playSound = getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
+            GLVideoRenderer[] r = new GLVideoRenderer[] { c2_renderer_1 };
+            SurfaceRelay[] rr = new SurfaceRelay[] { c2_relay_1 };
+            setupMediaPlayer(c2_player_1, r, rr, c2_preview_Surfcae_1, "c2_preview_1", playSound);
+            c2_renderer_1 = r[0];
+            c2_relay = rr[0];
         }
+
         LogUtil.log("【CS】Camera2处理过程完全执行");
     }
 
@@ -649,6 +752,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_renderer_1 = null;
                 GLVideoRenderer.releaseSafely(c2_reader_renderer);
                 c2_reader_renderer = null;
+                GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
                 GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
                 c2_reader_renderer_1 = null;
                 if (c2_player != null) {
@@ -691,7 +795,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            showToast("不存在替换视频\n" + toast_content.getPackageName() + "当前路径：" + VideoManager.video_path);
+                            showToast("不存在替换视频\n" + toast_content.getPackageName() + "当前路径："
+                                    + VideoManager.video_path);
                         } catch (Exception ee) {
                             LogUtil.log("【CS】[toast]" + ee.toString());
                         }
@@ -865,16 +970,8 @@ public class HookMain implements IXposedHookLoadPackage {
                                 return;
                             }
 
-                            File replacementFile = VideoManager.pickRandomImageFile();
-                            if (replacementFile == null) {
-                                LogUtil.log("【CS】未找到用于替换的BMP文件");
-                                return;
-                            }
-                            Bitmap pict = ImageUtils.getBMP(replacementFile.getAbsolutePath());
-                            ByteArrayOutputStream temp_array = new ByteArrayOutputStream();
-                            pict.compress(Bitmap.CompressFormat.JPEG, 100, temp_array);
-                            byte[] jpeg_data = temp_array.toByteArray();
-                            paramd.args[0] = jpeg_data;
+                            // Image replacement removed as part of refactoring
+                            LogUtil.log("【CS】拍照替换功能已禁用 (纯视频模式)");
                         } catch (Exception ee) {
                             LogUtil.log("【CS】" + ee.toString());
                         }
@@ -910,13 +1007,8 @@ public class HookMain implements IXposedHookLoadPackage {
                             if (getConfig().getBoolean(ConfigManager.KEY_DISABLE_MODULE, false)) {
                                 return;
                             }
-                            File replacementFile = VideoManager.pickRandomImageFile();
-                            if (replacementFile == null) {
-                                LogUtil.log("【CS】未找到用于替换的BMP文件");
-                                return;
-                            }
-                            input = ImageUtils.getYUVByBitmap(ImageUtils.getBMP(replacementFile.getAbsolutePath()));
-                            paramd.args[0] = input;
+                            // Image replacement removed as part of refactoring
+                            LogUtil.log("【CS】YUV拍照替换功能已禁用 (纯视频模式)");
                         } catch (Exception ee) {
                             LogUtil.log("【CS】" + ee.toString());
                         }
@@ -981,6 +1073,9 @@ public class HookMain implements IXposedHookLoadPackage {
                             if (hw_decode_obj == null) {
                                 hw_decode_obj = new VideoToFrames();
                             }
+                            // Set target size to match preview size (fixes WeChat video call 480x640 issue)
+                            hw_decode_obj.setTargetSize(mwidth, mhight);
+
                             hw_decode_obj.setSaveFrames("", OutputImageFormat.NV21);
                             try {
                                 hw_decode_obj.reset(getCurrentVideoPath());

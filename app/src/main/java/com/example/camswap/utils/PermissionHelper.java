@@ -18,17 +18,18 @@ import java.io.FileOutputStream;
 public class PermissionHelper {
 
     public static void checkAndSetupPaths(Context context, String packageName) {
-        if (context == null) return;
+        if (context == null)
+            return;
 
         ConfigManager config = VideoManager.getConfig();
         boolean forcePrivate = config.getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false);
         boolean providerAvailable = VideoManager.isProviderAvailable();
-        
+
         int auth_statue = 0;
         if (providerAvailable) {
             auth_statue = 2; // Provider available, treat as authorized
         }
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && auth_statue < 2) {
             try {
                 auth_statue += (context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) + 1);
@@ -47,7 +48,8 @@ public class PermissionHelper {
                     // Android 13+ has granular permissions.
                     int videoPerm = context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO);
                     int imagesPerm = context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES);
-                    if (videoPerm == PackageManager.PERMISSION_GRANTED || imagesPerm == PackageManager.PERMISSION_GRANTED) {
+                    if (videoPerm == PackageManager.PERMISSION_GRANTED
+                            || imagesPerm == PackageManager.PERMISSION_GRANTED) {
                         auth_statue += 1;
                     }
                 }
@@ -55,18 +57,20 @@ public class PermissionHelper {
                 LogUtil.log("【CS】[permission-check-33]" + ee.toString());
             }
         } else {
-            if (context.checkCallingPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED ){
+            if (context.checkCallingPermission(
+                    Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
                 auth_statue = 2;
             }
         }
 
-        //权限判断完毕
+        // 权限判断完毕
         if (auth_statue < 1 && !forcePrivate) {
             // Try public dir check
             try {
                 File publicDir = new File(ConfigManager.DEFAULT_CONFIG_DIR);
                 File configFile = new File(publicDir, ConfigManager.CONFIG_FILE_NAME);
-                if ((publicDir.exists() && publicDir.isDirectory() && publicDir.list() != null) || (configFile.exists() && configFile.canRead())) {
+                if ((publicDir.exists() && publicDir.isDirectory() && publicDir.list() != null)
+                        || (configFile.exists() && configFile.canRead())) {
                     LogUtil.log("【CS】权限检查失败但公共目录或配置文件可读，强制使用公共目录");
                     auth_statue = 2;
                 }
@@ -75,10 +79,12 @@ public class PermissionHelper {
             }
         }
 
-        LogUtil.log("【CS】权限状态 auth_statue: " + auth_statue + ", forcePrivate: " + forcePrivate + ", provider: " + providerAvailable);
-        
+        LogUtil.log("【CS】权限状态 auth_statue: " + auth_statue + ", forcePrivate: " + forcePrivate + ", provider: "
+                + providerAvailable);
+
         if ((auth_statue < 1 && !providerAvailable) || forcePrivate) {
-            // Fallback to private directory ONLY if no permission AND no provider, OR forced
+            // Fallback to private directory ONLY if no permission AND no provider, OR
+            // forced
             setupPrivateDirectory(context, packageName, config);
         } else {
             VideoManager.video_path = ConfigManager.DEFAULT_CONFIG_DIR;
@@ -88,7 +94,19 @@ public class PermissionHelper {
                 if (!uni_Camera1_path.exists()) {
                     uni_Camera1_path.mkdir();
                 }
+                createNoMediaFile(uni_Camera1_path);
             }
+        }
+    }
+
+    private static void createNoMediaFile(File dir) {
+        try {
+            File noMedia = new File(dir, ".nomedia");
+            if (!noMedia.exists()) {
+                noMedia.createNewFile();
+            }
+        } catch (Exception e) {
+            LogUtil.log("【CS】创建.nomedia失败: " + e.toString());
         }
     }
 
@@ -98,7 +116,7 @@ public class PermissionHelper {
             LogUtil.log("【CS】无法获取私有目录，可能存储不可用");
             return;
         }
-        
+
         File shown_file = new File(privateDir.getAbsolutePath() + "/Camera1/");
         if ((!shown_file.isDirectory()) && shown_file.exists()) {
             shown_file.delete();
@@ -106,9 +124,14 @@ public class PermissionHelper {
         if (!shown_file.exists()) {
             shown_file.mkdir();
         }
-        
+
         VideoManager.video_path = shown_file.getAbsolutePath() + "/";
         LogUtil.log("【CS】切换到私有目录: " + VideoManager.video_path);
+        try {
+            createNoMediaFile(shown_file);
+        } catch (Exception e) {
+            LogUtil.log("【CS】私有目录创建.nomedia失败: " + e);
+        }
 
         File markerFile = new File(privateDir.getAbsolutePath() + "/Camera1/" + "has_shown");
         boolean forceShow = config.getBoolean(ConfigManager.KEY_FORCE_SHOW_WARNING, false);
@@ -130,6 +153,16 @@ public class PermissionHelper {
 
     public static void showToast(final Context context, final String message) {
         if (context != null) {
+            // Check if toasts are disabled
+            try {
+                ConfigManager config = VideoManager.getConfig();
+                if (config != null && config.getBoolean(ConfigManager.KEY_DISABLE_TOAST, false)) {
+                    return;
+                }
+            } catch (Exception e) {
+                // Ignore config check errors and proceed to show toast (safe fallback)
+            }
+
             new Handler(Looper.getMainLooper()).post(new Runnable() {
                 @Override
                 public void run() {

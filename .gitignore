@@ -20,3 +20,7 @@ build_output.txt
 build_error_release.txt
 build_error.log
 .vscode/settings.json
+日志.txt
+build.log
+build_ansi.log
+desktop.ini

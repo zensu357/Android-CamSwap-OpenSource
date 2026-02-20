@@ -24,6 +24,7 @@ data class MainUiState(
     val enableRandomPlay: Boolean = false,
     val enableMicHook: Boolean = false,
     val micHookMode: String = "mute",
+
     val notificationControlEnabled: Boolean = false,
     val hasPermission: Boolean = false,
     val isXposedActive: Boolean = false,
@@ -125,6 +126,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(notificationControlEnabled = enabled) }
         }
     }
+
+
 
     fun updatePermissionStatus(hasPermission: Boolean) {
         _uiState.update { it.copy(hasPermission = hasPermission) }

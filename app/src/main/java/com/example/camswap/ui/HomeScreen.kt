@@ -48,17 +48,16 @@ fun HomeScreen(
     val mainUiState by mainViewModel.uiState.collectAsState()
     val mediaUiState by mediaViewModel.uiState.collectAsState()
 
-    val hasVideo = mediaUiState.videos.isNotEmpty()
+    // 根据替换模式判断是否有媒体资源和是否已选中
+    val hasMedia = mediaUiState.videos.isNotEmpty()
     val isSelected = !mediaUiState.selectedVideoName.isNullOrEmpty()
-    val isWorking = mainUiState.hasPermission && hasVideo && isSelected && !mainUiState.isModuleDisabled
+    val isWorking = mainUiState.hasPermission && hasMedia && isSelected && !mainUiState.isModuleDisabled
 
-    // Get display name
-    val selectedItem = mediaUiState.videos.find { it.name == mediaUiState.selectedVideoName }
-    val displayVideoNameRaw = selectedItem?.displayName ?: mediaUiState.selectedVideoName
-    val displayVideoName = if (displayVideoNameRaw == "Cam.mp4") {
-        mainUiState.originalVideoName ?: displayVideoNameRaw
-    } else {
-        displayVideoNameRaw
+    // Get display name (视频或图片)
+    val displayMediaName: String? = run {
+        val selectedItem = mediaUiState.videos.find { it.name == mediaUiState.selectedVideoName }
+        val raw = selectedItem?.displayName ?: mediaUiState.selectedVideoName
+        if (raw == "Cam.mp4") mainUiState.originalVideoName ?: raw else raw
     }
 
     // Get selected audio name
@@ -75,11 +74,11 @@ fun HomeScreen(
         StatusCard(
             isXposedActive = mainUiState.isXposedActive,
             hasPermission = mainUiState.hasPermission,
-            hasVideo = hasVideo,
+            hasMedia = hasMedia,
             isSelected = isSelected,
             isWorking = isWorking,
             isRandomPlay = mainUiState.enableRandomPlay,
-            mediaSourceName = displayVideoName,
+            mediaSourceName = displayMediaName,
             enableMicHook = mainUiState.enableMicHook,
             micHookMode = mainUiState.micHookMode,
             selectedAudioName = displayAudioName,
@@ -168,7 +167,7 @@ fun VersionCard(
 fun StatusCard(
     isXposedActive: Boolean,
     hasPermission: Boolean,
-    hasVideo: Boolean,
+    hasMedia: Boolean,
     isSelected: Boolean,
     isWorking: Boolean,
     isRandomPlay: Boolean,
@@ -178,10 +177,14 @@ fun StatusCard(
     selectedAudioName: String?,
     playVideoSound: Boolean,
     notificationControlEnabled: Boolean,
-
+    isImageMode: Boolean = false, // Deprecated, always false
     onPermissionRequest: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val noMediaStr = stringResource(R.string.status_no_video)
+    val noSelectionStr = stringResource(R.string.status_no_selection)
+    val noMediaHint = stringResource(R.string.status_add_video_hint)
+    val noSelectionHint = stringResource(R.string.status_select_video_hint)
     val (backgroundColor, textColor, statusText, statusIcon) = when {
         !isXposedActive -> Quadruple(
             colorScheme.errorContainer,
@@ -195,16 +198,16 @@ fun StatusCard(
             stringResource(R.string.status_no_permission),
             Icons.Default.Error
         )
-        !hasVideo -> Quadruple(
+        !hasMedia -> Quadruple(
             colorScheme.tertiaryContainer,
             colorScheme.onTertiaryContainer,
-            stringResource(R.string.status_no_video),
+            noMediaStr,
             Icons.Default.Warning
         )
         !isSelected -> Quadruple(
             colorScheme.tertiaryContainer,
             colorScheme.onTertiaryContainer,
-            stringResource(R.string.status_no_selection),
+            noSelectionStr,
             Icons.Default.Warning
         )
         isWorking -> Quadruple(
@@ -275,15 +278,15 @@ fun StatusCard(
                 ) {
                     Text(stringResource(R.string.status_grant_permission), fontSize = 14.sp)
                 }
-            } else if (!hasVideo) {
+            } else if (!hasMedia) {
                 Text(
-                    text = stringResource(R.string.status_add_video_hint),
+                    text = noMediaHint,
                     fontSize = 14.sp,
                     color = textColor.copy(alpha = 0.8f)
                 )
             } else if (!isSelected) {
                 Text(
-                    text = stringResource(R.string.status_select_video_hint),
+                    text = noSelectionHint,
                     fontSize = 14.sp,
                     color = textColor.copy(alpha = 0.8f)
                 )

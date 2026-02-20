@@ -1,6 +1,7 @@
 package com.example.camswap;
 
 import android.os.Environment;
+import android.content.Context;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -43,7 +44,12 @@ public class ConfigManager {
     public static final String MIC_MODE_MUTE = "mute";
     public static final String MIC_MODE_REPLACE = "replace";
     public static final String MIC_MODE_VIDEO_SYNC = "video_sync";
-    public static final String KEY_VIDEO_ROTATION_OFFSET = "video_rotation_offset"; // 手动旋转偏移 0/90/180/270
+    public static final String KEY_VIDEO_ROTATION_OFFSET = "video_rotation_offset"; // 视频旋转偏移角度
+
+    // Broadcast Actions
+    public static final String ACTION_UPDATE_CONFIG = "com.example.camswap.ACTION_UPDATE_CONFIG";
+    public static final String ACTION_REQUEST_CONFIG = "com.example.camswap.ACTION_REQUEST_CONFIG";
+    public static final String EXTRA_CONFIG_JSON = "config_json";
 
     // Fallback switch
     public static boolean ENABLE_LEGACY_FILE_ACCESS = true;
@@ -98,11 +104,12 @@ public class ConfigManager {
     }
 
     /**
-     * 强制重新加载配置，忽略防抖时间限制。
+     * 强制重新加载配置，忽略防抖时间限制和文件修改时间检查。
      * 用于 ContentObserver.onChange() 等需要立即读取最新配置的场景。
      */
     public void forceReload() {
-        lastReloadTime = 0; // Reset debounce
+        lastReloadTime = 0; // 重置防抖
+        lastLoadedTime = 0; // 重置文件时间戳，强制重读文件
         reload();
     }
 
@@ -134,15 +141,23 @@ public class ConfigManager {
                     }
                 }
                 cursor.close();
-                configData = newConfig;
 
-                // Debug log
-                com.example.camswap.utils.LogUtil.log("【CS】配置已通过 ContentProvider 重新加载: " + configData.toString());
-
-                return true;
+                // Only treat as success if we actually got some config entries.
+                // An empty cursor means the Provider hasn't loaded the config yet,
+                // so we fall through to reloadFromFile().
+                if (newConfig.length() > 0) {
+                    configData = newConfig;
+                    com.example.camswap.utils.LogUtil.log("【CS】配置已通过 ContentProvider 重新加载: " + configData.toString());
+                    return true;
+                } else {
+                    com.example.camswap.utils.LogUtil
+                            .log("【CS】配置 Provider 返回的 Cursor 为空 (0 行), URI: " + uri.toString() + "，降级到文件读取");
+                    // Log caller to identify who is triggering reload
+                    com.example.camswap.utils.LogUtil
+                            .log("【CS】Reload trigger stack: " + android.util.Log.getStackTraceString(new Throwable()));
+                }
             } else {
                 com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 返回的 Cursor 为空, URI: " + uri.toString());
-                // Log caller to identify who is triggering reload
                 com.example.camswap.utils.LogUtil
                         .log("【CS】Reload trigger stack: " + android.util.Log.getStackTraceString(new Throwable()));
             }
@@ -152,10 +167,98 @@ public class ConfigManager {
         return false;
     }
 
+    /**
+     * Request config from host app via broadcast.
+     * Useful for cold start of target app when provider/file is inaccessible.
+     */
+    public void requestConfig(Context context) {
+        try {
+            android.content.Intent intent = new android.content.Intent(ACTION_REQUEST_CONFIG);
+            intent.setPackage("com.example.camswap"); // Explicit intent to wake up host receiver
+            context.sendBroadcast(intent);
+            com.example.camswap.utils.LogUtil.log("【CS】已发送配置请求广播 config request broadcast sent");
+        } catch (Exception e) {
+            com.example.camswap.utils.LogUtil.log("【CS】发送配置请求广播失败: " + e);
+        }
+    }
+
+    /**
+     * Send current config via broadcast.
+     */
+    public void sendConfigBroadcast(Context context) {
+        try {
+            android.content.Intent intent = new android.content.Intent(ACTION_UPDATE_CONFIG);
+            intent.putExtra(EXTRA_CONFIG_JSON, configData.toString());
+
+            if (getBoolean(KEY_FORCE_PRIVATE_DIR, false)) {
+                String videoName = getString(KEY_SELECTED_VIDEO, "Cam.mp4");
+                File videoFile = null;
+                if (videoName != null && !videoName.isEmpty()) {
+                    videoFile = new File(DEFAULT_CONFIG_DIR, videoName);
+                }
+                if (videoFile == null || !videoFile.exists()) {
+                    File[] files = new File(DEFAULT_CONFIG_DIR)
+                            .listFiles((dir, name) -> name.toLowerCase().endsWith(".mp4"));
+                    if (files != null && files.length > 0) {
+                        videoFile = files[0];
+                    }
+                }
+                if (videoFile != null && !videoFile.exists()) {
+                    videoFile = new File(DEFAULT_CONFIG_DIR, "Cam.mp4");
+                }
+                if (videoFile != null && videoFile.exists()) {
+                    try {
+                        final File finalVideoFile = videoFile;
+                        android.os.Bundle bundle = new android.os.Bundle();
+                        com.example.camswap.utils.LogUtil
+                                .log("【CS】准备附加 video_binder: " + finalVideoFile.getAbsolutePath());
+                        bundle.putBinder("video_binder", new android.os.Binder() {
+                            @Override
+                            protected boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply,
+                                    int flags) throws android.os.RemoteException {
+                                com.example.camswap.utils.LogUtil.log("【CS】【Binder】收到 transact 请求, code=" + code);
+                                if (code == 1) { // 1 = Get FD
+                                    reply.writeNoException();
+                                    try {
+                                        android.os.ParcelFileDescriptor pfd = android.os.ParcelFileDescriptor
+                                                .open(finalVideoFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+                                        reply.writeInt(1);
+                                        pfd.writeToParcel(reply, android.os.Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
+                                        com.example.camswap.utils.LogUtil
+                                                .log("【CS】【Binder】成功将 ParcelFileDescriptor 写入 reply");
+                                    } catch (Exception e) {
+                                        com.example.camswap.utils.LogUtil.log("【CS】【Binder】提取 PFD 失败: " + e);
+                                        reply.writeInt(0);
+                                    }
+                                    return true;
+                                }
+                                return super.onTransact(code, data, reply, flags);
+                            }
+                        });
+                        intent.putExtra("video_bundle", bundle);
+                    } catch (Exception e) {
+                        com.example.camswap.utils.LogUtil.log("【CS】广播附加 video_bundle 失败: " + e);
+                    }
+                }
+            }
+
+            context.sendBroadcast(intent);
+            com.example.camswap.utils.LogUtil.log("【CS】已广播当前配置 config broadcast sent");
+        } catch (Exception e) {
+            com.example.camswap.utils.LogUtil.log("【CS】广播配置失败: " + e);
+        }
+    }
+
     private void reloadFromFile() {
         File configFile = new File(DEFAULT_CONFIG_DIR, CONFIG_FILE_NAME);
         if (configFile.exists()) {
-            if (configFile.lastModified() > lastLoadedTime) {
+            long fileModTime = configFile.lastModified();
+            // fileModTime==0 means we couldn't get modification time (external storage
+            // restriction).
+            // When lastLoadedTime==0 (forceReload triggered), always read regardless of
+            // timestamp.
+            boolean shouldRead = (lastLoadedTime == 0) || (fileModTime > 0 && fileModTime > lastLoadedTime);
+            if (shouldRead) {
                 try {
                     FileInputStream fis = new FileInputStream(configFile);
                     InputStreamReader isr = new InputStreamReader(fis);
@@ -167,26 +270,25 @@ public class ConfigManager {
                     }
                     bufferedReader.close();
                     configData = new JSONObject(stringBuilder.toString());
-                    lastLoadedTime = configFile.lastModified();
+                    lastLoadedTime = (fileModTime > 0) ? fileModTime : System.currentTimeMillis();
                     // Debug log
-                    com.example.camswap.utils.LogUtil.log("【CS】Config reloaded from: " + configFile.getAbsolutePath());
-                    com.example.camswap.utils.LogUtil.log("【CS】Content: " + configData.toString());
+                    com.example.camswap.utils.LogUtil
+                            .log("【CS】Config reloaded from file: " + configFile.getAbsolutePath());
+                    com.example.camswap.utils.LogUtil.log("【CS】File content: " + configData.toString());
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    com.example.camswap.utils.LogUtil.log("【CS】Config file read error: " + e);
                     if (configData == null)
                         configData = new JSONObject();
                 }
+            } else {
+                com.example.camswap.utils.LogUtil.log("【CS】Config file unchanged (modTime=" + fileModTime
+                        + " lastLoaded=" + lastLoadedTime + "), skip read");
             }
         } else {
-            // Debug log for missing config
             com.example.camswap.utils.LogUtil.log("【CS】Config file not found: " + configFile.getAbsolutePath());
-
-            // Only reset if we haven't loaded anything yet or if the file was deleted
             if (configData == null) {
                 configData = new JSONObject();
             }
-            // Don't reset lastLoadedTime so we don't reload empty config if file is missing
-            // but we have data in memory
         }
     }
 
@@ -208,6 +310,8 @@ public class ConfigManager {
                     context.getContentResolver().notifyChange(uri, null);
                 } catch (Exception ignored) {
                 }
+                // Send broadcast with config content
+                sendConfigBroadcast(context);
             }
         } catch (JSONException e) {
             e.printStackTrace();
@@ -225,6 +329,8 @@ public class ConfigManager {
                     context.getContentResolver().notifyChange(uri, null);
                 } catch (Exception ignored) {
                 }
+                // Send broadcast with config content
+                sendConfigBroadcast(context);
             }
         } catch (JSONException e) {
             e.printStackTrace();
@@ -254,6 +360,16 @@ public class ConfigManager {
         try {
             configData.put(KEY_TARGET_PACKAGES, jsonArray);
             save();
+            // Notify if context is available
+            if (context != null) {
+                try {
+                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
+                    context.getContentResolver().notifyChange(uri, null);
+                } catch (Exception ignored) {
+                }
+                // Send broadcast with config content
+                sendConfigBroadcast(context);
+            }
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -287,6 +403,8 @@ public class ConfigManager {
                     context.getContentResolver().notifyChange(uri, null);
                 } catch (Exception ignored) {
                 }
+                // Send broadcast with config content
+                sendConfigBroadcast(context);
             }
         } catch (JSONException e) {
             e.printStackTrace();
@@ -303,6 +421,25 @@ public class ConfigManager {
             FileOutputStream fos = new FileOutputStream(configFile);
             fos.write(configData.toString(4).getBytes());
             fos.close();
+
+            // Set world-readable so hook processes (inside target apps) can read
+            // the config file via direct path when ContentProvider is unavailable.
+            try {
+                configFile.setReadable(true, false);
+                configFile.setWritable(true, true); // Keep write restricted to owner
+                // Also chmod parents so directory is traversable
+                dir.setExecutable(true, false);
+                dir.setReadable(true, false);
+                // Double-ensure with Runtime.exec (some ROMs ignore Java setReadable)
+                Runtime.getRuntime().exec(new String[] { "chmod", "644", configFile.getAbsolutePath() });
+            } catch (Exception ignored) {
+                // Best-effort
+            }
+
+            // Broadcast changes if context is available
+            if (context != null) {
+                sendConfigBroadcast(context);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -346,5 +483,21 @@ public class ConfigManager {
     public void importConfig(String json) throws JSONException {
         configData = new JSONObject(json);
         save();
+    }
+
+    /**
+     * Parse config from JSON string and update memory cache.
+     * Does NOT save to file to avoid EACCES errors in target app.
+     */
+    public void updateConfigFromJSON(String json) {
+        try {
+            configData = new JSONObject(json);
+            // Update timestamps to prevent reloadFromFile from overwriting
+            lastLoadedTime = System.currentTimeMillis();
+            lastReloadTime = System.currentTimeMillis();
+            com.example.camswap.utils.LogUtil.log("【CS】已通过广播更新内存配置");
+        } catch (JSONException e) {
+            com.example.camswap.utils.LogUtil.log("【CS】解析广播配置失败: " + e);
+        }
     }
 }

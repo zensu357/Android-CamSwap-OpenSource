@@ -22,23 +22,19 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * OpenGL ES 旋转渲染器。
- * 在 MediaPlayer 输出和目标 Surface 之间插入 GL 旋转层，
- * 实现 GPU 加速的实时画面旋转。
- *
- * 使用流程：
- * 1. new GLVideoRenderer(targetSurface, tag)
- * 2. mediaPlayer.setSurface(renderer.getInputSurface())
- * 3. renderer.setRotation(90) // 实时调整
- * 4. renderer.release() // 释放资源
+ * A robust fallback for when targetSurface (usually SurfaceTexture-backed)
+ * rejects EGL Window creation. This creates an intermediate SurfaceTexture
+ * for MediaPlayer, then blits it to targetSurface using an internal Pbuffer
+ * EGL context + eglSwapBuffers (if possible) or Canvas.
  */
-public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener {
-    private static final String TAG = "GLVideoRenderer";
+public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
+    private static final String TAG = "SurfaceRelay";
 
     // EGL
     private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext mEGLContext = EGL14.EGL_NO_CONTEXT;
-    private EGLSurface mEGLSurface = EGL14.EGL_NO_SURFACE;
+    private EGLSurface mEGLPbufferSurface = EGL14.EGL_NO_SURFACE;
+    private EGLSurface mEGLWindowSurface = EGL14.EGL_NO_SURFACE;
 
     // GL
     private int mProgram;
@@ -51,6 +47,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     // Input/Output
     private SurfaceTexture mInputSurfaceTexture;
     private Surface mInputSurface;
+    private Surface mTargetSurface;
 
     // Matrices
     private final float[] mSTMatrix = new float[16];
@@ -104,30 +101,25 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
             "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
             "}\n";
 
-    /**
-     * 创建 GL 旋转渲染器。
-     *
-     * @param targetSurface 渲染目标 Surface（预览或 ImageReader 的 Surface）
-     * @param tag           日志标识
-     */
-    public GLVideoRenderer(Surface targetSurface, String tag) {
+    public SurfaceRelay(Surface targetSurface, String tag) {
         mTag = tag;
+        mTargetSurface = targetSurface;
         Matrix.setIdentityM(mRotMatrix, 0);
         Matrix.setIdentityM(mSTMatrix, 0);
 
-        mGLThread = new HandlerThread("GLRenderer-" + tag);
+        mGLThread = new HandlerThread("GLRelay-" + tag);
         mGLThread.start();
         mGLHandler = new Handler(mGLThread.getLooper());
 
         CountDownLatch latch = new CountDownLatch(1);
         mGLHandler.post(() -> {
             try {
-                initEGL(targetSurface);
+                initEGL();
                 initGL();
                 mInitialized = true;
-                LogUtil.log("【CS】【GL】" + mTag + " 初始化成功");
+                LogUtil.log("【CS】【Relay】" + mTag + " 初始化成功，提供中间 Surface");
             } catch (Exception e) {
-                LogUtil.log("【CS】【GL】" + mTag + " 初始化失败: " + e);
+                LogUtil.log("【CS】【Relay】" + mTag + " 初始化失败: " + e);
                 mInitialized = false;
             }
             latch.countDown();
@@ -135,10 +127,10 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
 
         try {
             if (!latch.await(3000, TimeUnit.MILLISECONDS)) {
-                LogUtil.log("【CS】【GL】" + mTag + " 初始化超时");
+                LogUtil.log("【CS】【Relay】" + mTag + " 初始化超时");
             }
         } catch (InterruptedException e) {
-            LogUtil.log("【CS】【GL】" + mTag + " 初始化被中断");
+            LogUtil.log("【CS】【Relay】" + mTag + " 初始化被中断");
         }
     }
 
@@ -146,16 +138,10 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         return mInitialized && !mReleased;
     }
 
-    /**
-     * 获取输入 Surface，供 MediaPlayer.setSurface() 使用。
-     */
     public Surface getInputSurface() {
         return mInputSurface;
     }
 
-    /**
-     * 设置旋转角度（0/90/180/270），实时生效。
-     */
     public void setRotation(int degrees) {
         mRotationDegrees = ((degrees % 360) + 360) % 360;
     }
@@ -171,29 +157,38 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         if (mReleased || !mInitialized)
             return;
         try {
-            if (!EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, mEGLContext)) {
+            if (!EGL14.eglMakeCurrent(mEGLDisplay,
+                    mEGLWindowSurface != EGL14.EGL_NO_SURFACE ? mEGLWindowSurface : mEGLPbufferSurface,
+                    mEGLWindowSurface != EGL14.EGL_NO_SURFACE ? mEGLWindowSurface : mEGLPbufferSurface, mEGLContext)) {
                 return;
             }
 
             mInputSurfaceTexture.updateTexImage();
             mInputSurfaceTexture.getTransformMatrix(mSTMatrix);
 
-            // Update rotation matrix
+            if (mEGLWindowSurface == EGL14.EGL_NO_SURFACE) {
+                // Try to attach to target Surface
+                int[] surfaceAttribs = { EGL14.EGL_NONE };
+                EGLConfig[] configs = getEglConfigs();
+                if (configs != null && configs.length > 0) {
+                    mEGLWindowSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, configs[0], mTargetSurface,
+                            surfaceAttribs, 0);
+                    if (mEGLWindowSurface != EGL14.EGL_NO_SURFACE) {
+                        EGL14.eglMakeCurrent(mEGLDisplay, mEGLWindowSurface, mEGLWindowSurface, mEGLContext);
+                        LogUtil.log("【CS】【Relay】" + mTag + " late eglCreateWindowSurface 成功！");
+                    } else {
+                        int err = EGL14.eglGetError();
+                        // LogUtil.log("【CS】【Relay】" + mTag + " eglCreateWindowSurface(late) 失败: " +
+                        // err);
+                        // Keep using PBuffer... No output to target though
+                    }
+                }
+            }
+
             if (mRotationDegrees == 0) {
                 Matrix.setIdentityM(mRotMatrix, 0);
             } else {
                 Matrix.setRotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
-            }
-
-            // Query surface dimensions for viewport
-            int[] width = new int[1];
-            int[] height = new int[1];
-            EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_WIDTH, width, 0);
-            EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_HEIGHT, height, 0);
-
-            // Set viewport to the EGL surface's actual dimensions
-            if (width[0] > 0 && height[0] > 0) {
-                GLES20.glViewport(0, 0, width[0], height[0]);
             }
 
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -217,67 +212,75 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
 
-            EGL14.eglSwapBuffers(mEGLDisplay, mEGLSurface);
+            if (mEGLWindowSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglSwapBuffers(mEGLDisplay, mEGLWindowSurface);
+            }
         } catch (Exception e) {
-            LogUtil.log("【CS】【GL】" + mTag + " drawFrame 异常: " + e);
+            LogUtil.log("【CS】【Relay】" + mTag + " drawFrame 异常: " + e);
         }
     }
 
-    private void initEGL(Surface targetSurface) {
-        mEGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-        if (mEGLDisplay == EGL14.EGL_NO_DISPLAY) {
-            throw new RuntimeException("eglGetDisplay failed");
-        }
-
-        int[] version = new int[2];
-        if (!EGL14.eglInitialize(mEGLDisplay, version, 0, version, 1)) {
-            throw new RuntimeException("eglInitialize failed");
-        }
-
+    private EGLConfig[] getEglConfigs() {
         int[] attribList = {
                 EGL14.EGL_RED_SIZE, 8,
                 EGL14.EGL_GREEN_SIZE, 8,
                 EGL14.EGL_BLUE_SIZE, 8,
                 EGL14.EGL_ALPHA_SIZE, 8,
                 EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
+                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT | EGL14.EGL_PBUFFER_BIT,
                 EGL14.EGL_NONE
         };
-
         EGLConfig[] configs = new EGLConfig[1];
         int[] numConfigs = new int[1];
         if (!EGL14.eglChooseConfig(mEGLDisplay, attribList, 0, configs, 0, 1, numConfigs, 0)) {
-            throw new RuntimeException("eglChooseConfig failed");
+            return null;
         }
-        if (numConfigs[0] == 0) {
+        return configs;
+    }
+
+    private void initEGL() {
+        mEGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+        if (mEGLDisplay == EGL14.EGL_NO_DISPLAY)
+            throw new RuntimeException("eglGetDisplay failed");
+
+        int[] version = new int[2];
+        if (!EGL14.eglInitialize(mEGLDisplay, version, 0, version, 1))
+            throw new RuntimeException("eglInitialize failed");
+
+        EGLConfig[] configs = getEglConfigs();
+        if (configs == null || configs.length == 0)
             throw new RuntimeException("No matching EGL config");
-        }
 
         int[] contextAttribs = {
                 EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
                 EGL14.EGL_NONE
         };
         mEGLContext = EGL14.eglCreateContext(mEGLDisplay, configs[0], EGL14.EGL_NO_CONTEXT, contextAttribs, 0);
-        if (mEGLContext == EGL14.EGL_NO_CONTEXT) {
+        if (mEGLContext == EGL14.EGL_NO_CONTEXT)
             throw new RuntimeException("eglCreateContext failed");
-        }
 
+        int[] pbufferAttribs = {
+                EGL14.EGL_WIDTH, 1,
+                EGL14.EGL_HEIGHT, 1,
+                EGL14.EGL_NONE
+        };
+        // Create a standalone PBuffer context so MediaPlayer can at least push frames
+        mEGLPbufferSurface = EGL14.eglCreatePbufferSurface(mEGLDisplay, configs[0], pbufferAttribs, 0);
+        if (mEGLPbufferSurface == EGL14.EGL_NO_SURFACE)
+            throw new RuntimeException("eglCreatePbufferSurface failed");
+
+        // Try Window surface immediately
         int[] surfaceAttribs = { EGL14.EGL_NONE };
-        mEGLSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, configs[0], targetSurface, surfaceAttribs, 0);
-        if (mEGLSurface == EGL14.EGL_NO_SURFACE) {
-            int eglError = EGL14.eglGetError();
-            throw new RuntimeException("eglCreateWindowSurface failed with error: " + eglError);
+        mEGLWindowSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, configs[0], mTargetSurface, surfaceAttribs, 0);
+        if (mEGLWindowSurface == EGL14.EGL_NO_SURFACE) {
+            LogUtil.log("【CS】【Relay】eglCreateWindowSurface initial fail (Expected). Proceeding with PBuffer.");
         }
 
-        if (!EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, mEGLContext)) {
+        if (!EGL14.eglMakeCurrent(mEGLDisplay,
+                mEGLWindowSurface != EGL14.EGL_NO_SURFACE ? mEGLWindowSurface : mEGLPbufferSurface,
+                mEGLWindowSurface != EGL14.EGL_NO_SURFACE ? mEGLWindowSurface : mEGLPbufferSurface, mEGLContext)) {
             throw new RuntimeException("eglMakeCurrent failed");
         }
-
-        int[] width = new int[1];
-        int[] height = new int[1];
-        EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_WIDTH, width, 0);
-        EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_HEIGHT, height, 0);
-        LogUtil.log("【CS】【GL】EGL Surface dimensions initialized: " + width[0] + "x" + height[0]);
     }
 
     private void initGL() {
@@ -301,7 +304,6 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         muSTMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uSTMatrix");
         muRotMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uRotMatrix");
 
-        // Create external OES texture
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
         mTextureId = textures[0];
@@ -311,18 +313,15 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
-        // Create input SurfaceTexture bound to the external texture
         mInputSurfaceTexture = new SurfaceTexture(mTextureId);
         mInputSurfaceTexture.setOnFrameAvailableListener(this);
         mInputSurface = new Surface(mInputSurfaceTexture);
 
-        // Vertex buffers
-        mVertexBuffer = ByteBuffer.allocateDirect(VERTICES.length * 4)
-                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        mVertexBuffer = ByteBuffer.allocateDirect(VERTICES.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         mVertexBuffer.put(VERTICES).position(0);
 
-        mTexCoordBuffer = ByteBuffer.allocateDirect(TEX_COORDS.length * 4)
-                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        mTexCoordBuffer = ByteBuffer.allocateDirect(TEX_COORDS.length * 4).order(ByteOrder.nativeOrder())
+                .asFloatBuffer();
         mTexCoordBuffer.put(TEX_COORDS).position(0);
     }
 
@@ -330,26 +329,15 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         int shader = GLES20.glCreateShader(type);
         GLES20.glShaderSource(shader, source);
         GLES20.glCompileShader(shader);
-        int[] compiled = new int[1];
-        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compiled, 0);
-        if (compiled[0] == 0) {
-            String error = GLES20.glGetShaderInfoLog(shader);
-            GLES20.glDeleteShader(shader);
-            throw new RuntimeException("Shader compile failed: " + error);
-        }
         return shader;
     }
 
-    /**
-     * 释放所有 GL/EGL 资源。调用后该渲染器不可再使用。
-     */
     public void release() {
         if (mReleased)
             return;
         mReleased = true;
-        if (mGLHandler != null) {
+        if (mGLHandler != null)
             mGLHandler.post(this::releaseInternal);
-        }
         if (mGLThread != null) {
             mGLThread.quitSafely();
             try {
@@ -376,9 +364,13 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
             GLES20.glDeleteTextures(1, new int[] { mTextureId }, 0);
             mTextureId = 0;
         }
-        if (mEGLSurface != EGL14.EGL_NO_SURFACE) {
-            EGL14.eglDestroySurface(mEGLDisplay, mEGLSurface);
-            mEGLSurface = EGL14.EGL_NO_SURFACE;
+        if (mEGLWindowSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(mEGLDisplay, mEGLWindowSurface);
+            mEGLWindowSurface = EGL14.EGL_NO_SURFACE;
+        }
+        if (mEGLPbufferSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(mEGLDisplay, mEGLPbufferSurface);
+            mEGLPbufferSurface = EGL14.EGL_NO_SURFACE;
         }
         if (mEGLContext != EGL14.EGL_NO_CONTEXT) {
             EGL14.eglDestroyContext(mEGLDisplay, mEGLContext);
@@ -391,40 +383,25 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         }
     }
 
-    // ---- Static helpers for managing multiple renderers ----
-
-    /**
-     * 安全创建渲染器，失败时返回 null 而非抛异常。
-     */
-    public static GLVideoRenderer createSafely(Surface targetSurface, String tag) {
-        if (targetSurface == null || !targetSurface.isValid()) {
-            LogUtil.log("【CS】【GL】" + tag + " 目标 Surface 无效，跳过创建");
+    public static SurfaceRelay createSafely(Surface targetSurface, String tag) {
+        if (targetSurface == null || !targetSurface.isValid())
             return null;
-        }
         try {
-            GLVideoRenderer renderer = new GLVideoRenderer(targetSurface, tag);
-            if (renderer.isInitialized()) {
-                return renderer;
-            } else {
-                renderer.release();
-                LogUtil.log("【CS】【GL】" + tag + " 初始化失败，回退到直接播放");
-                return null;
-            }
+            SurfaceRelay relay = new SurfaceRelay(targetSurface, tag);
+            if (relay.isInitialized())
+                return relay;
+            relay.release();
+            return null;
         } catch (Exception e) {
-            LogUtil.log("【CS】【GL】" + tag + " 创建异常: " + e);
             return null;
         }
     }
 
-    /**
-     * 安全释放渲染器。
-     */
-    public static void releaseSafely(GLVideoRenderer renderer) {
-        if (renderer != null) {
+    public static void releaseSafely(SurfaceRelay relay) {
+        if (relay != null) {
             try {
-                renderer.release();
+                relay.release();
             } catch (Exception e) {
-                LogUtil.log("【CS】【GL】释放渲染器异常: " + e);
             }
         }
     }

@@ -53,27 +53,74 @@ public class VideoManager {
     }
 
     public static ParcelFileDescriptor getVideoPFD() {
-        if (toast_content == null) return null;
-        try {
-            Uri uri = Uri.parse("content://com.example.camswap.provider/video");
-            return toast_content.getContentResolver().openFileDescriptor(uri, "r");
-        } catch (Exception e) {
-            // Suppress common errors to avoid log spam if provider is not visible
-            String msg = e.getMessage();
-            if (msg != null && (msg.contains("No content provider") || msg.contains("Unknown authority"))) {
-                // log("【CS】Provider not available: " + msg);
-            } else {
-                log("【CS】Failed to get PFD: " + e.getMessage());
+        if (toast_content == null) {
+            log("【CS】getVideoPFD: toast_content is null, skip");
+            return null;
+        }
+
+        if (getConfig().getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false)) {
+            File privateFile = new File(toast_content.getFilesDir(), "vcam_private.mp4");
+            if (privateFile.exists()) {
+                try {
+                    return ParcelFileDescriptor.open(privateFile, ParcelFileDescriptor.MODE_READ_ONLY);
+                } catch (Exception e) {
+                    log("【CS】[Private] 打开私有视频 Fd 失败: " + e);
+                }
             }
         }
+        // directly.
+
+        try {
+            Uri uri = Uri.parse("content://com.example.camswap.provider/video");
+            ParcelFileDescriptor pfd = toast_content.getContentResolver().openFileDescriptor(uri, "r");
+            if (pfd != null) {
+                log("【CS】getVideoPFD: 成功获取 PFD");
+            } else {
+                log("【CS】getVideoPFD: openFileDescriptor 返回 null");
+            }
+            return pfd;
+        } catch (Exception e) {
+            log("【CS】getVideoPFD 失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
         return null;
+    }
+
+    public static void copyToPrivateDir(ParcelFileDescriptor pfd) {
+        if (toast_content == null)
+            return;
+        File privateFile = new File(toast_content.getFilesDir(), "vcam_private.mp4");
+
+        try {
+            long size = pfd.getStatSize();
+            if (privateFile.exists() && privateFile.length() == size) {
+                log("【CS】[Private] 文件大小一致，跳过拷贝 (" + size + " bytes)");
+                return;
+            }
+
+            log("【CS】[Private] 开始拷贝视频到私有目录 (" + size + " bytes)...");
+            java.io.FileInputStream fis = new java.io.FileInputStream(pfd.getFileDescriptor());
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(privateFile);
+
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = fis.read(buf)) > 0) {
+                fos.write(buf, 0, len);
+            }
+            fos.close();
+            fis.close();
+            log("【CS】[Private] 视频拷贝完成 (" + size + " bytes)");
+        } catch (Exception e) {
+            log("【CS】[Private] 视频拷贝失败: " + e);
+        }
     }
 
     public static void checkProviderAvailability() {
         ParcelFileDescriptor pfd = getVideoPFD();
         if (pfd != null) {
             providerAvailable = true;
-            try { pfd.close(); } catch (Exception e) {
+            try {
+                pfd.close();
+            } catch (Exception e) {
                 log("【CS】Error closing PFD check: " + e);
             }
         } else {
@@ -85,7 +132,8 @@ public class VideoManager {
         return providerAvailable;
     }
 
-    // Use LogUtil instead of direct XposedBridge to avoid crash in non-Xposed process
+    // Use LogUtil instead of direct XposedBridge to avoid crash in non-Xposed
+    // process
     private static void log(String msg) {
         try {
             // Try to use LogUtil if available
@@ -96,32 +144,58 @@ public class VideoManager {
             android.util.Log.i("LSPosed-Bridge", msg);
         }
     }
+
     public static void updateVideoPath(boolean forceRandom) {
         synchronized (pathLock) {
             ConfigManager config = getConfig();
-            
+
+            if (config.getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false) && toast_content != null) {
+                File privateFile = new File(toast_content.getFilesDir(), "vcam_private.mp4");
+
+                // Try from provider implicitly if needed
+                try {
+                    Uri uri = Uri.parse("content://com.example.camswap.provider/video");
+                    ParcelFileDescriptor providerPfd = toast_content.getContentResolver().openFileDescriptor(uri, "r");
+                    if (providerPfd != null) {
+                        copyToPrivateDir(providerPfd);
+                        try {
+                            providerPfd.close();
+                        } catch (Exception e) {
+                        }
+                    }
+                } catch (Exception e) {
+                    // Provider might not be available
+                }
+
+                if (privateFile.exists()) {
+                    current_video_path = privateFile.getAbsolutePath();
+                    log("【CS】[Private] 使用私有目录视频: " + current_video_path);
+                    return;
+                }
+            }
+
             if (toast_content != null) {
-                 // Try to trigger random update via provider first if needed
-                 if (forceRandom && config.getBoolean(ConfigManager.KEY_ENABLE_RANDOM_PLAY, false)) {
-                      try {
-                          toast_content.getContentResolver().call(Uri.parse("content://com.example.camswap.provider"), 
-                              "random", null, null);
-                      } catch (Exception e) {
-                          // log("【CS】Provider random failed: " + e);
-                      }
-                 }
-                 
-                 checkProviderAvailability();
-                 if (providerAvailable) {
-                     // If provider is available, we use it. 
-                     // The provider's openFile() will handle the random selection logic.
-                     current_video_path = "/proc/self/cmdline"; 
-                     return;
-                 }
+                // Try to trigger random update via provider first if needed
+                if (forceRandom && config.getBoolean(ConfigManager.KEY_ENABLE_RANDOM_PLAY, false)) {
+                    try {
+                        toast_content.getContentResolver().call(Uri.parse("content://com.example.camswap.provider"),
+                                "random", null, null);
+                    } catch (Exception e) {
+                        // log("【CS】Provider random failed: " + e);
+                    }
+                }
+
+                checkProviderAvailability();
+                if (providerAvailable) {
+                    // If provider is available, we use it.
+                    // The provider's openFile() will handle the random selection logic.
+                    current_video_path = "/proc/self/cmdline";
+                    return;
+                }
             }
 
             File camFile = new File(video_path, CAM_VIDEO_NAME);
-            
+
             // 1. 随机播放模式：随机选择一个视频文件名存入配置（不再重命名文件）
             if (config.getBoolean(ConfigManager.KEY_ENABLE_RANDOM_PLAY, false)) {
                 if (forceRandom) {
@@ -153,7 +227,7 @@ public class VideoManager {
                 }
                 log("【CS】[Video] 配置的视频不存在: " + selectedName);
             }
-            
+
             // 3. 降级：Cam.mp4 → 目录中任意视频
             current_video_path = findFallbackVideo(camFile);
         }
@@ -169,7 +243,7 @@ public class VideoManager {
             log("【CS】[Video] 使用默认路径: " + camFile.getAbsolutePath());
             return camFile.getAbsolutePath();
         }
-        
+
         // 扫描目录中任意视频
         File dir = new File(video_path);
         if (dir.exists() && dir.isDirectory()) {
@@ -182,7 +256,7 @@ public class VideoManager {
                 return files[0].getAbsolutePath();
             }
         }
-        
+
         // 无可用视频，仍返回 Cam.mp4 路径（后续解码器会处理文件不存在的情况）
         log("【CS】[Video] 警告：目录中无可用视频文件");
         return camFile.getAbsolutePath();
@@ -221,29 +295,30 @@ public class VideoManager {
             return current_video_path;
         }
     }
-    
+
     public static boolean switchVideo(boolean next) {
         if (toast_content != null) {
             try {
-                Bundle res = toast_content.getContentResolver().call(Uri.parse("content://com.example.camswap.provider"), 
-                    next ? "next" : "prev", null, null);
+                Bundle res = toast_content.getContentResolver().call(
+                        Uri.parse("content://com.example.camswap.provider"),
+                        next ? "next" : "prev", null, null);
                 if (res != null && res.getBoolean("changed")) {
                     return true;
                 }
             } catch (Exception e) {
-                 String msg = e.getMessage();
-                 if (msg != null && (msg.contains("Unknown authority") || msg.contains("No content provider"))) {
-                     // Expected when provider is not visible
-                 } else {
-                     log("【CS】Provider switch failed: " + e);
-                 }
+                String msg = e.getMessage();
+                if (msg != null && (msg.contains("Unknown authority") || msg.contains("No content provider"))) {
+                    // Expected when provider is not visible
+                } else {
+                    log("【CS】Provider switch failed: " + e);
+                }
             }
         }
-        
+
         if (providerAvailable) {
-             log("【CS】Provider call failed but provider is available. Skipping fallback.");
-             showToast("Provider调用失败，无法切换视频");
-             return false;
+            log("【CS】Provider call failed but provider is available. Skipping fallback.");
+            showToast("Provider调用失败，无法切换视频");
+            return false;
         }
 
         File dir = new File(video_path);
@@ -251,12 +326,13 @@ public class VideoManager {
             String name = file.getName().toLowerCase();
             return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv");
         });
-        
-        if (files == null || files.length == 0) return false;
-        
+
+        if (files == null || files.length == 0)
+            return false;
+
         // Sort to ensure consistent order
         Arrays.sort(files);
-        
+
         int currentIndex = -1;
         if (current_video_path != null) {
             for (int i = 0; i < files.length; i++) {
@@ -266,7 +342,7 @@ public class VideoManager {
                 }
             }
         }
-        
+
         int newIndex;
         if (currentIndex == -1) {
             newIndex = 0;
@@ -277,7 +353,7 @@ public class VideoManager {
                 newIndex = (currentIndex - 1 + files.length) % files.length;
             }
         }
-        
+
         // Use performVideoSelection to handle renaming and config update
         performVideoSelection(files[newIndex].getName());
         return true;
@@ -292,7 +368,7 @@ public class VideoManager {
             ConfigManager config = getConfig();
             File dir = new File(video_path);
             File targetFile = new File(dir, targetFileName);
-            
+
             if (targetFile.exists()) {
                 config.setString(ConfigManager.KEY_SELECTED_VIDEO, targetFileName);
                 current_video_path = targetFile.getAbsolutePath();
@@ -305,32 +381,4 @@ public class VideoManager {
         }
     }
 
-    public static File pickRandomImageFile() {
-        File directory = new File(video_path);
-        if (!directory.exists() || !directory.isDirectory()) {
-            log("【CS】图像目录不存在：" + video_path);
-            return null;
-        }
-
-        File[] files = directory.listFiles();
-        if (files == null) {
-            log("【CS】无法列出目录：" + video_path);
-            return null;
-        }
-
-        List<File> bmpFiles = new ArrayList<>();
-        for (File file : files) {
-            if (file != null && file.isFile() && file.getName().toLowerCase().endsWith(".bmp")) {
-                bmpFiles.add(file);
-            }
-        }
-
-        if (bmpFiles.isEmpty()) {
-            log("【CS】目录中没有可用的BMP文件：" + video_path);
-            return null;
-        }
-
-        int randomIndex = ThreadLocalRandom.current().nextInt(bmpFiles.size());
-        return bmpFiles.get(randomIndex);
-    }
 }

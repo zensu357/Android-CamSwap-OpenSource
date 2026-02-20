@@ -48,6 +48,12 @@
             android:authorities="com.example.camswap.provider"
             android:exported="true"
             android:grantUriPermissions="true" />
+
+        <receiver android:name=".ConfigReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.camswap.ACTION_REQUEST_CONFIG" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
@@ -60,5 +66,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    
+
 
 </manifest>

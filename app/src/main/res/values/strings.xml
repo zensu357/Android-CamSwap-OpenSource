@@ -40,8 +40,7 @@
     <string name="status_value_all_apps">全部应用</string>
 
     <!-- Manage Screen -->
-    <string name="tab_video_manage">视频管理</string>
-    <string name="tab_image_manage">图片管理</string>
+    <string name="tab_video_manage">媒体库</string>
     <string name="tab_audio_manage">音频管理</string>
     <string name="desc_add_media">添加媒体</string>
     <string name="stats_video_format">总计: %1$d | 大小: %2$.2f MB | 时长: %3$s</string>
@@ -97,6 +96,13 @@
     <string name="language_en">English</string>
     <string name="language_zh">中文</string>
 
+    <!-- Replace Mode -->
+    <string name="settings_replace_mode">替换模式</string>
+    <string name="replace_mode_video">视频模式</string>
+    <string name="replace_mode_video_desc">使用视频替换相机预览和拍照</string>
+    <string name="replace_mode_image">图片模式</string>
+    <string name="replace_mode_image_desc">使用静态图片替换相机预览和拍照</string>
+
     <!-- Notification Service -->
     <string name="notif_rotate_label">旋转:</string>
     <string name="notif_rotate_offset">旋转偏移: </string>
@@ -116,6 +122,10 @@
     <string name="status_grant_permission">授予权限</string>
     <string name="status_add_video_hint">请在管理页面添加视频</string>
     <string name="status_select_video_hint">请在管理页面选择视频</string>
+    <string name="status_no_image">未添加图片</string>
+    <string name="status_no_image_selection">未选择图片</string>
+    <string name="status_add_image_hint">请在管理页面的「图片」 Tab 中添加图片</string>
+    <string name="status_select_image_hint">请在管理页面的「图片」 Tab 中选择图片</string>
 
     <!-- Home Screen - Support Card -->
     <string name="support_title">支持</string>

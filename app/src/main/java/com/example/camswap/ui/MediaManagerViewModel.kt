@@ -17,6 +17,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
 import com.example.camswap.ConfigManager
+import com.example.camswap.utils.ImageToVideoConverter
+
 
 enum class MediaType {
     VIDEO, IMAGE, AUDIO
@@ -71,6 +73,8 @@ class MediaManagerViewModel(application: Application) : AndroidViewModel(applica
             }?.toList() ?: emptyList()
 
             val videoItems = videoFiles.map { file ->
+                // Ensure world-readable so hook process (inside target app) can read via direct path
+                try { file.setReadable(true, false) } catch (_: Exception) {}
                 var duration = 0L
                 try {
                     val retriever = MediaMetadataRetriever()
@@ -204,17 +208,86 @@ class MediaManagerViewModel(application: Application) : AndroidViewModel(applica
             for (uri in uris) {
                 try {
                     val originalName = getFileName(context, uri)
-                    val extension = originalName?.substringAfterLast('.', "") ?: if (type == MediaType.VIDEO) "mp4" else "jpg"
-                    val fileName = if (originalName != null) originalName else "media_${System.currentTimeMillis()}.$extension"
+                    val mimeType = context.contentResolver.getType(uri)
+                    android.util.Log.d("CamSwap", "addMedia: type=$type, uri=$uri, mimeType=$mimeType, name=$originalName")
                     
-                    val destFile = File(mediaDir, fileName)
-                    
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        FileOutputStream(destFile).use { output ->
-                            input.copyTo(output)
+                    var effectiveType = type
+                    // If adding to video list, check if it's actually an image that needs conversion
+                    if (type == MediaType.VIDEO) {
+                        val isImage = (mimeType?.startsWith("image/") == true) || 
+                                      (originalName?.lowercase(Locale.getDefault())?.endsWith(".jpg") == true) || 
+                                      (originalName?.lowercase(Locale.getDefault())?.endsWith(".jpeg") == true) || 
+                                      (originalName?.lowercase(Locale.getDefault())?.endsWith(".png") == true) ||
+                                      (originalName?.lowercase(Locale.getDefault())?.endsWith(".bmp") == true) ||
+                                      (originalName?.lowercase(Locale.getDefault())?.endsWith(".webp") == true)
+                        if (isImage) {
+                            effectiveType = MediaType.IMAGE
                         }
                     }
+
+                    if (effectiveType == MediaType.IMAGE) {
+                        android.util.Log.d("CamSwap", "开始图片转视频流程...")
+                        
+                        // 1. Save to temp file using the original name to produce a clean output filename
+                        val extension = originalName?.substringAfterLast('.', "jpg") ?: "jpg"
+                        val safeBaseName = (originalName?.substringBeforeLast('.') ?: "img")
+                            .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+                            .take(30)
+                        val tempFile = File(context.cacheDir, "${safeBaseName}.$extension")
+                        
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(tempFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        
+                        android.util.Log.d("CamSwap", "临时文件已保存: ${tempFile.absolutePath}, 大小: ${tempFile.length()}")
+                        
+                        if (!tempFile.exists() || tempFile.length() == 0L) {
+                            android.util.Log.e("CamSwap", "临时文件为空或不存在!")
+                            continue
+                        }
+                        
+                        // 2. Convert to video
+                        val convertedFile = ImageToVideoConverter.convert(tempFile.absolutePath, mediaDir)
+                        
+                        // 3. Delete temp file
+                        if (tempFile.exists()) tempFile.delete()
+                        
+                        if (convertedFile != null && convertedFile.exists() && convertedFile.length() > 0) {
+                            android.util.Log.d("CamSwap", "转换成功: ${convertedFile.name}, 大小: ${convertedFile.length()}")
+                            // Auto-select the converted video
+                            configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, convertedFile.name)
+                            _uiState.update { it.copy(selectedVideoName = convertedFile.name) }
+                            try {
+                                context.contentResolver.notifyChange(
+                                    Uri.parse("content://com.example.camswap.provider/config"), null)
+                            } catch (_: Exception) {}
+                        } else {
+                            android.util.Log.e("CamSwap", "图片转视频失败! convertedFile=$convertedFile")
+                        }
+                        
+                    } else {
+                        // Handle Video / Audio
+                        val extension = originalName?.substringAfterLast('.', "") ?: if (type == MediaType.VIDEO) "mp4" else "mp3"
+                        val fileName = if (originalName != null) originalName else "media_${System.currentTimeMillis()}.$extension"
+                        
+                        val destFile = File(mediaDir, fileName)
+                        
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(destFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        // Set world-readable so hook process can read via direct path
+                        try {
+                            destFile.setReadable(true, false)
+                            Runtime.getRuntime().exec(arrayOf("chmod", "644", destFile.absolutePath))
+                        } catch (_: Exception) {}
+                        android.util.Log.d("CamSwap", "文件已保存: ${destFile.absolutePath}, 大小: ${destFile.length()}")
+                    }
                 } catch (e: Exception) {
+                    android.util.Log.e("CamSwap", "addMedia 异常: ${e.message}", e)
                     e.printStackTrace()
                 }
             }

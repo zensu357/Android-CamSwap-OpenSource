@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
@@ -91,6 +92,8 @@ fun SettingsScreen(
 
             SettingsDivider()
 
+
+
             SettingsSwitchRow(
                 icon = Icons.Default.Mic,
                 title = stringResource(R.string.settings_mic_hook),
@@ -142,15 +145,7 @@ fun SettingsScreen(
 
         // ==================== Advanced Settings ====================
         SettingsSection(title = stringResource(R.string.settings_category_advanced)) {
-            SettingsSwitchRow(
-                icon = Icons.Outlined.PowerSettingsNew,
-                title = stringResource(R.string.settings_disable_module),
-                subtitle = stringResource(R.string.settings_disable_module_desc),
-                checked = uiState.isModuleDisabled,
-                onCheckedChange = { viewModel.setModuleDisabled(it) }
-            )
 
-            SettingsDivider()
 
             SettingsSwitchRow(
                 icon = Icons.Outlined.Warning,

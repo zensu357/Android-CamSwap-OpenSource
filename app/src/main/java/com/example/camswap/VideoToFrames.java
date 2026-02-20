@@ -380,31 +380,49 @@ public class VideoToFrames implements Runnable {
                         int effectiveRotation = (mVideoRotation + currentManualOffset + 360) % 360;
 
                         boolean needSwapDimensions = (effectiveRotation == 90 || effectiveRotation == 270);
-                        int rotatedWidth = needSwapDimensions ? height : width;
-                        int rotatedHeight = needSwapDimensions ? width : height;
+                        int finalWidth = needSwapDimensions ? height : width;
+                        int finalHeight = needSwapDimensions ? width : height;
 
                         byte[] rawData = getDataFromImage(image, COLOR_FormatNV21);
-                        byte[] rotatedData;
+                        byte[] processedData;
+
+                        // 1. Rotation
                         if (effectiveRotation != 0) {
-                            rotatedData = rotateNV21(rawData, width, height, effectiveRotation);
+                            processedData = rotateNV21(rawData, width, height, effectiveRotation);
                         } else {
-                            rotatedData = rawData;
+                            processedData = rawData;
+                        }
+
+                        // 2. Scaling (if target size is set and mismatches)
+                        if (targetWidth > 0 && targetHeight > 0
+                                && (finalWidth != targetWidth || finalHeight != targetHeight)) {
+                            // LogUtil.log("【CS】Scaling frame from " + finalWidth + "x" + finalHeight + " to
+                            // " + targetWidth + "x" + targetHeight);
+                            processedData = cropAndScaleNV21(processedData, finalWidth, finalHeight, targetWidth,
+                                    targetHeight);
+                            finalWidth = targetWidth;
+                            finalHeight = targetHeight;
                         }
 
                         if (mQueue != null) {
                             try {
-                                mQueue.put(rotatedData);
+                                mQueue.put(processedData);
                             } catch (InterruptedException e) {
                                 LogUtil.log("【CS】" + e.toString());
-                                BytePool.release(rotatedData);
+                                BytePool.release(processedData);
                             }
                         }
                         if (outputImageFormat != null) {
                             byte[] old = HookMain.data_buffer;
-                            HookMain.data_buffer = rotatedData;
-                            HookMain.mwidth = rotatedWidth;
-                            HookMain.mhight = rotatedHeight;
-                            if (old != null && old.length > 1 && old != rotatedData) {
+                            HookMain.data_buffer = processedData;
+                            // Do NOT overwrite mwidth/mhight if we are respecting target size
+                            // If target size was set, these should match HookMain's expectations already
+                            if (targetWidth == 0 || targetHeight == 0) {
+                                HookMain.mwidth = finalWidth;
+                                HookMain.mhight = finalHeight;
+                            }
+
+                            if (old != null && old.length > 1 && old != processedData) {
                                 BytePool.release(old);
                             }
                         }
@@ -412,7 +430,7 @@ public class VideoToFrames implements Runnable {
                         // 如果有 play_surf（Camera2 reader Surface），将旋转后的帧渲染上去
                         if (play_surf != null) {
                             try {
-                                renderNV21ToSurface(rotatedData, rotatedWidth, rotatedHeight, play_surf);
+                                renderNV21ToSurface(processedData, finalWidth, finalHeight, play_surf);
                             } catch (Exception e) {
                                 LogUtil.log("【CS】渲染到Surface失败: " + e.toString());
                             }
@@ -436,6 +454,70 @@ public class VideoToFrames implements Runnable {
         if (callback != null) {
             callback.onFinishDecode();
         }
+    }
+
+    private int targetWidth = 0;
+    private int targetHeight = 0;
+
+    public void setTargetSize(int w, int h) {
+        this.targetWidth = w;
+        this.targetHeight = h;
+    }
+
+    private byte[] cropAndScaleNV21(byte[] src, int srcW, int srcH, int dstW, int dstH) {
+        float srcAspect = (float) srcW / srcH;
+        float dstAspect = (float) dstW / dstH;
+
+        int cropW = srcW;
+        int cropH = srcH;
+        int cropX = 0;
+        int cropY = 0;
+
+        if (srcAspect > dstAspect) {
+            // Source is wider than target -> Crop horizontal
+            cropW = (int) (srcH * dstAspect);
+            cropW = cropW & ~1; // Ensure even
+            cropX = (srcW - cropW) / 2;
+            cropX = cropX & ~1; // Ensure even
+        } else if (srcAspect < dstAspect) {
+            // Source is taller than target -> Crop vertical
+            cropH = (int) (srcW / dstAspect);
+            cropH = cropH & ~1; // Ensure even
+            cropY = (srcH - cropH) / 2;
+            cropY = cropY & ~1; // Ensure even
+        }
+
+        byte[] dst = new byte[dstW * dstH * 3 / 2];
+
+        int scaleX_fp = (cropW << 16) / dstW;
+        int scaleY_fp = (cropH << 16) / dstH;
+
+        // Scale Y
+        for (int y = 0; y < dstH; y++) {
+            int sy = cropY + ((y * scaleY_fp) >> 16);
+            int srcRowOffset = sy * srcW;
+            int dstRowOffset = y * dstW;
+            for (int x = 0; x < dstW; x++) {
+                int sx = cropX + ((x * scaleX_fp) >> 16);
+                dst[dstRowOffset + x] = src[srcRowOffset + sx];
+            }
+        }
+
+        // Scale UV
+        int srcUVStart = srcW * srcH;
+        int dstUVStart = dstW * dstH;
+        for (int y = 0; y < dstH / 2; y++) {
+            int sy = (cropY / 2) + ((y * scaleY_fp) >> 16);
+            int srcRowOffset = srcUVStart + sy * srcW;
+            int dstRowOffset = dstUVStart + y * dstW;
+            for (int x = 0; x < dstW / 2; x++) {
+                int sx = (cropX / 2) + ((x * scaleX_fp) >> 16);
+                int srcColOffset = sx * 2;
+                dst[dstRowOffset + x * 2] = src[srcRowOffset + srcColOffset];
+                dst[dstRowOffset + x * 2 + 1] = src[srcRowOffset + srcColOffset + 1];
+            }
+        }
+        return dst;
     }
 
     /**

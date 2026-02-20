@@ -100,6 +100,7 @@ public class Camera1Handler implements ICameraHandler {
                         }
                         HookMain.need_to_show_toast = !VideoManager.getConfig()
                                 .getBoolean(ConfigManager.KEY_DISABLE_TOAST, false);
+
                         if (!file.exists()) {
                             if (HookMain.toast_content != null && HookMain.need_to_show_toast) {
                                 try {
@@ -114,6 +115,26 @@ public class Camera1Handler implements ICameraHandler {
                         HookMain.is_someone_playing = false;
                         LogUtil.log("【CS】开始预览");
                         HookMain.start_preview_camera = (Camera) param.thisObject;
+
+                        try {
+                            android.hardware.Camera.Parameters params = HookMain.start_preview_camera.getParameters();
+                            android.hardware.Camera.Size size = params.getPreviewSize();
+                            if (size != null) {
+                                if (HookMain.mSurfacetexture != null) {
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
+                                        HookMain.mSurfacetexture.setDefaultBufferSize(size.width, size.height);
+                                    }
+                                    LogUtil.log("【CS】修正目标 SurfaceTexture 尺寸为: " + size.width + "x" + size.height);
+                                }
+                                if (HookMain.ori_holder != null) {
+                                    HookMain.ori_holder.setFixedSize(size.width, size.height);
+                                    LogUtil.log("【CS】修正目标 SurfaceHolder 尺寸为: " + size.width + "x" + size.height);
+                                }
+                            }
+                        } catch (Exception e) {
+                            LogUtil.log("【CS】修正 Surface 尺寸异常: " + e.getMessage());
+                        }
+
                         if (HookMain.ori_holder != null) {
 
                             if (HookMain.mplayer1 == null) {
@@ -133,9 +154,9 @@ public class Camera1Handler implements ICameraHandler {
                             HookMain.c1_renderer_holder = renderer;
                             if (renderer != null && renderer.isInitialized()) {
                                 HookMain.mplayer1.setSurface(renderer.getInputSurface());
-                                int rotation = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET,
+                                int rotation2 = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET,
                                         0);
-                                renderer.setRotation(rotation);
+                                renderer.setRotation(rotation2);
                             } else {
                                 HookMain.mplayer1.setSurface(HookMain.ori_holder.getSurface());
                             }
@@ -191,9 +212,9 @@ public class Camera1Handler implements ICameraHandler {
                             HookMain.c1_renderer_texture = renderer2;
                             if (renderer2 != null && renderer2.isInitialized()) {
                                 HookMain.mMediaPlayer.setSurface(renderer2.getInputSurface());
-                                int rotation = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET,
+                                int rotation2 = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET,
                                         0);
-                                renderer2.setRotation(rotation);
+                                renderer2.setRotation(rotation2);
                             } else {
                                 HookMain.mMediaPlayer.setSurface(HookMain.mSurface);
                             }

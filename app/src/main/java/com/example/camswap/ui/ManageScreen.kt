@@ -38,7 +38,6 @@ fun ManageScreen(
     var selectedTabIndex by remember { mutableStateOf(0) }
     val tabs = listOf(
         stringResource(R.string.tab_video_manage),
-        stringResource(R.string.tab_image_manage),
         stringResource(R.string.tab_audio_manage)
     )
     val uiState by viewModel.uiState.collectAsState()
@@ -57,15 +56,8 @@ fun ManageScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
+            // Pass as MediaType.VIDEO, ViewModel will auto-detect images and convert them
             viewModel.addMedia(uris, MediaType.VIDEO)
-        }
-    }
-
-    val imageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            viewModel.addMedia(uris, MediaType.IMAGE)
         }
     }
 
@@ -83,9 +75,8 @@ fun ManageScreen(
                 FloatingActionButton(
                     onClick = {
                         when (selectedTabIndex) {
-                            0 -> videoLauncher.launch(arrayOf("video/*"))
-                            1 -> imageLauncher.launch(arrayOf("image/*"))
-                            2 -> audioLauncher.launch(arrayOf("audio/*"))
+                            0 -> videoLauncher.launch(arrayOf("video/*", "image/*"))
+                            1 -> audioLauncher.launch(arrayOf("audio/*"))
                         }
                     }
                 ) {
@@ -105,11 +96,6 @@ fun ManageScreen(
                             uiState.videos.size,
                             uiState.totalVideoSizeMb,
                             uiState.totalVideoDurationStr
-                        )
-                        1 -> stringResource(
-                            R.string.stats_image_format,
-                            uiState.images.size,
-                            uiState.totalImageSizeMb
                         )
                         else -> stringResource(
                             R.string.stats_audio_format,
@@ -142,11 +128,10 @@ fun ManageScreen(
                                     verticalArrangement = Arrangement.Center
                                 ) {
                                     Icon(
-                                imageVector = when (index) {
-                                    0 -> Icons.Default.VideoLibrary
-                                    1 -> Icons.Default.Image
-                                    else -> Icons.Default.MusicNote
-                                },
+                                        imageVector = when (index) {
+                                            0 -> Icons.Default.VideoLibrary
+                                            else -> Icons.Default.MusicNote
+                                        },
                                         contentDescription = null,
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -172,12 +157,10 @@ fun ManageScreen(
                     MediaList(
                         items = when (selectedTabIndex) {
                             0 -> uiState.videos
-                            1 -> uiState.images
                             else -> uiState.audios
                         },
                         selectedName = when (selectedTabIndex) {
                             0 -> uiState.selectedVideoName
-                            1 -> uiState.selectedImageName
                             else -> uiState.selectedAudioName
                         },
                         onDelete = { viewModel.deleteMedia(it) },
