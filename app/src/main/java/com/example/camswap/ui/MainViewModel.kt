@@ -17,7 +17,6 @@ import java.net.URL
 
 data class MainUiState(
     val isModuleDisabled: Boolean = false,
-    val forceShowWarning: Boolean = false,
     val playVideoSound: Boolean = false,
     val forcePrivateDir: Boolean = false,
     val disableToast: Boolean = false,
@@ -49,7 +48,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { currentState ->
                 currentState.copy(
                     isModuleDisabled = configManager.getBoolean(ConfigManager.KEY_DISABLE_MODULE, false),
-                    forceShowWarning = configManager.getBoolean(ConfigManager.KEY_FORCE_SHOW_WARNING, false),
                     playVideoSound = configManager.getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false),
                     forcePrivateDir = configManager.getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false),
                     disableToast = configManager.getBoolean(ConfigManager.KEY_DISABLE_TOAST, false),
@@ -68,13 +66,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             configManager.setBoolean(ConfigManager.KEY_DISABLE_MODULE, disabled)
             _uiState.update { it.copy(isModuleDisabled = disabled) }
-        }
-    }
-
-    fun setForceShowWarning(enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            configManager.setBoolean(ConfigManager.KEY_FORCE_SHOW_WARNING, enabled)
-            _uiState.update { it.copy(forceShowWarning = enabled) }
         }
     }
 

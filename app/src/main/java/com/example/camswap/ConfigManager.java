@@ -15,7 +15,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 public class ConfigManager {
-    public static final String CONFIG_FILE_NAME = "vcam_config.json";
+    public static final String CONFIG_FILE_NAME = "cs_config.json";
     public static final String DEFAULT_CONFIG_DIR;
     static {
         String path;
@@ -29,7 +29,6 @@ public class ConfigManager {
 
     // Config Keys
     public static final String KEY_DISABLE_MODULE = "disable_module";
-    public static final String KEY_FORCE_SHOW_WARNING = "force_show_warning";
     public static final String KEY_PLAY_VIDEO_SOUND = "play_video_sound";
     public static final String KEY_FORCE_PRIVATE_DIR = "force_private_dir";
     public static final String KEY_DISABLE_TOAST = "disable_toast";
@@ -453,7 +452,6 @@ public class ConfigManager {
         // Map old files to new keys
         String[][] fileToKey = {
                 { "disable.jpg", KEY_DISABLE_MODULE },
-                { "force_show.jpg", KEY_FORCE_SHOW_WARNING },
                 { "no-silent.jpg", KEY_PLAY_VIDEO_SOUND },
                 { "private_dir.jpg", KEY_FORCE_PRIVATE_DIR },
                 { "no_toast.jpg", KEY_DISABLE_TOAST }

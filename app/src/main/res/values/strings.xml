@@ -41,6 +41,7 @@
 
     <!-- Manage Screen -->
     <string name="tab_video_manage">媒体库</string>
+    <string name="tab_image_manage">图片管理</string>
     <string name="tab_audio_manage">音频管理</string>
     <string name="desc_add_media">添加媒体</string>
     <string name="stats_video_format">总计: %1$d | 大小: %2$.2f MB | 时长: %3$s</string>
@@ -73,8 +74,6 @@
     <string name="nav_settings">设置</string>
 
     <!-- Additional Settings -->
-    <string name="settings_force_warning">强制显示警告</string>
-    <string name="settings_force_warning_desc">在Hook成功时显示Toast提示</string>
     <string name="settings_force_private_dir">强制私有目录</string>
     <string name="settings_force_private_dir_desc">解决部分应用无法读取文件的问题</string>
     <string name="settings_disable_toast">禁用Toast</string>
@@ -118,7 +117,7 @@
 
     <!-- Home Screen - Status Card -->
     <string name="status_module_inactive">模块未激活</string>
-    <string name="status_activate_hint">请在 Xposed 管理器中激活模块并重启</string>
+    <string name="status_activate_hint">请在 Xposed 管理器中激活模块后重启app</string>
     <string name="status_grant_permission">授予权限</string>
     <string name="status_add_video_hint">请在管理页面添加视频</string>
     <string name="status_select_video_hint">请在管理页面选择视频</string>

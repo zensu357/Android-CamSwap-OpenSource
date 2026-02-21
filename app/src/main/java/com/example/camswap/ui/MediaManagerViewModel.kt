@@ -59,7 +59,27 @@ class MediaManagerViewModel(application: Application) : AndroidViewModel(applica
         if (!mediaDir.exists()) {
             mediaDir.mkdirs()
         }
+        createNoMediaFile()
         loadMedia()
+    }
+
+    private fun createNoMediaFile() {
+        try {
+            val noMediaFile = File(mediaDir, ".nomedia")
+            if (!noMediaFile.exists()) {
+                val created = noMediaFile.createNewFile()
+                if (created) {
+                    android.media.MediaScannerConnection.scanFile(
+                        getApplication(),
+                        arrayOf(noMediaFile.absolutePath, mediaDir.absolutePath),
+                        null,
+                        null
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CamSwap", "创建.nomedia失败: ${e.message}")
+        }
     }
 
     fun loadMedia() {

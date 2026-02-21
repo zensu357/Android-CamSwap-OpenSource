@@ -146,17 +146,6 @@ fun SettingsScreen(
         // ==================== Advanced Settings ====================
         SettingsSection(title = stringResource(R.string.settings_category_advanced)) {
 
-
-            SettingsSwitchRow(
-                icon = Icons.Outlined.Warning,
-                title = stringResource(R.string.settings_force_warning),
-                subtitle = stringResource(R.string.settings_force_warning_desc),
-                checked = uiState.forceShowWarning,
-                onCheckedChange = { viewModel.setForceShowWarning(it) }
-            )
-
-            SettingsDivider()
-
             SettingsSwitchRow(
                 icon = Icons.Outlined.FolderSpecial,
                 title = stringResource(R.string.settings_force_private_dir),
@@ -318,9 +307,9 @@ private fun SettingsSection(
 ) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = MaterialTheme.shapes.large
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

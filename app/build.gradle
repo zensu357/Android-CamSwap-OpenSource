@@ -34,7 +34,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode versionCodeInt
-        versionName "0.18.${versionSuffix}"
+        versionName "0.20.${versionSuffix}"
         
         // Inject build time into BuildConfig
         buildConfigField "String", "BUILD_TIME", "\"${buildTime}\""
@@ -59,6 +59,8 @@ android {
         release {
             if (signingConfigs.release.storeFile) {
                 signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
             }
             minifyEnabled true
             shrinkResources true

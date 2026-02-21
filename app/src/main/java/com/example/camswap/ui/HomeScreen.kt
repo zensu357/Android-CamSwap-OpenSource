@@ -391,7 +391,7 @@ private fun StatusRow(
             text = label,
             fontSize = 13.sp,
             color = tint.copy(alpha = 0.6f),
-            modifier = Modifier.width(72.dp)
+            modifier = Modifier.widthIn(min = 60.dp, max = 90.dp)
         )
         Spacer(modifier = Modifier.weight(1f))
         if (valueIcon != null) {
@@ -410,7 +410,7 @@ private fun StatusRow(
             color = tint.copy(alpha = 0.85f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 180.dp)
+            modifier = Modifier.widthIn(max = 200.dp)
         )
     }
     if (!isLast) {

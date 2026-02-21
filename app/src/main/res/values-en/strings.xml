@@ -23,11 +23,11 @@
     <string name="status_no_selection">No Video Selected</string>
     <string name="status_working">Active</string>
     <string name="status_paused">Paused</string>
-    <string name="status_label_video">Video Source</string>
-    <string name="status_label_play_mode">Play Mode</string>
-    <string name="status_label_mic">Microphone</string>
-    <string name="status_label_video_sound">Original Video Sound</string>
-    <string name="status_label_notification">Notification Control</string>
+    <string name="status_label_video">Source</string>
+    <string name="status_label_play_mode">Mode</string>
+    <string name="status_label_mic">Mic</string>
+    <string name="status_label_video_sound">Video Audio</string>
+    <string name="status_label_notification">Notification</string>
     <string name="status_label_target_apps">Target Apps</string>
     <string name="status_value_on">On</string>
     <string name="status_value_off">Off</string>
@@ -69,8 +69,6 @@
     <string name="settings_disable_module_desc">Temporarily disable all Hook functions</string>
     
     <!-- Additional Settings -->
-    <string name="settings_force_warning">Force Show Warning</string>
-    <string name="settings_force_warning_desc">Show Toast when Hook succeeds</string>
     <string name="settings_force_private_dir">Force Private Dir</string>
     <string name="settings_force_private_dir_desc">Fix file read issues for some apps</string>
     <string name="settings_disable_toast">Disable Toast</string>
