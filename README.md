@@ -112,7 +112,7 @@ keyPassword=your_key_password
 ## ❤️ 支持
 
 请点Star以示支持，感谢你的支持。
-![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=20260219)
+![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=20260222)
 
 
 ## 📄 许可证
