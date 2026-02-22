@@ -5,7 +5,7 @@ Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能�
 
 本项目采用现代化的 Android 开发技术栈（Kotlin, Jetpack Compose）重构，并引入了基于 ContentProvider 的跨进程数据传输机制，兼容高版本 Android (11+) 的文件权限隔离。
 
-具体实现方式查看仓库中的 `code description.md` 文件（仅适用v2.0前版本）。
+具体实现方式查看仓库中的 `code description.md` 文件（仅适用v2.0及前版本）。
 
 ## ✨ 主要功能
 
