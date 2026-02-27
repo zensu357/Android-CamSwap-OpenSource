@@ -69,37 +69,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     private FloatBuffer mVertexBuffer;
     private FloatBuffer mTexCoordBuffer;
 
-    private static final float[] VERTICES = {
-            -1.0f, -1.0f,
-            1.0f, -1.0f,
-            -1.0f, 1.0f,
-            1.0f, 1.0f,
-    };
-
-    private static final float[] TEX_COORDS = {
-            0.0f, 0.0f,
-            1.0f, 0.0f,
-            0.0f, 1.0f,
-            1.0f, 1.0f,
-    };
-
-    private static final String VERTEX_SHADER = "uniform mat4 uSTMatrix;\n" +
-            "uniform mat4 uRotMatrix;\n" +
-            "attribute vec4 aPosition;\n" +
-            "attribute vec4 aTextureCoord;\n" +
-            "varying vec2 vTextureCoord;\n" +
-            "void main() {\n" +
-            "    gl_Position = uRotMatrix * aPosition;\n" +
-            "    vTextureCoord = (uSTMatrix * aTextureCoord).xy;\n" +
-            "}\n";
-
-    private static final String FRAGMENT_SHADER = "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;\n" +
-            "varying vec2 vTextureCoord;\n" +
-            "uniform samplerExternalOES sTexture;\n" +
-            "void main() {\n" +
-            "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
-            "}\n";
+    // Shader sources, vertices, and tex coords shared via GLHelper
 
     public SurfaceRelay(Surface targetSurface, String tag) {
         mTag = tag;
@@ -284,8 +254,8 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     }
 
     private void initGL() {
-        int vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
-        int fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+        int vertexShader = GLHelper.loadShader(GLES20.GL_VERTEX_SHADER, GLHelper.VERTEX_SHADER);
+        int fragmentShader = GLHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, GLHelper.FRAGMENT_SHADER);
         mProgram = GLES20.glCreateProgram();
         GLES20.glAttachShader(mProgram, vertexShader);
         GLES20.glAttachShader(mProgram, fragmentShader);
@@ -317,19 +287,8 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
         mInputSurfaceTexture.setOnFrameAvailableListener(this);
         mInputSurface = new Surface(mInputSurfaceTexture);
 
-        mVertexBuffer = ByteBuffer.allocateDirect(VERTICES.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
-        mVertexBuffer.put(VERTICES).position(0);
-
-        mTexCoordBuffer = ByteBuffer.allocateDirect(TEX_COORDS.length * 4).order(ByteOrder.nativeOrder())
-                .asFloatBuffer();
-        mTexCoordBuffer.put(TEX_COORDS).position(0);
-    }
-
-    private int loadShader(int type, String source) {
-        int shader = GLES20.glCreateShader(type);
-        GLES20.glShaderSource(shader, source);
-        GLES20.glCompileShader(shader);
-        return shader;
+        mVertexBuffer = GLHelper.createFloatBuffer(GLHelper.VERTICES);
+        mTexCoordBuffer = GLHelper.createFloatBuffer(GLHelper.TEX_COORDS);
     }
 
     public void release() {

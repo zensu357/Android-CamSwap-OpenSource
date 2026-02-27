@@ -78,6 +78,8 @@
     <string name="settings_force_private_dir_desc">解决部分应用无法读取文件的问题</string>
     <string name="settings_disable_toast">禁用Toast</string>
     <string name="settings_disable_toast_desc">隐藏所有操作提示</string>
+    <string name="settings_enable_photo_fake">启用拍照内容替换</string>
+    <string name="settings_enable_photo_fake_desc">动态拦截单次拍照请求并注入视频帧（性能开销高）</string>
     <string name="settings_system_permission">系统权限设置</string>
     <string name="settings_system_permission_desc">管理应用的存储和通知权限</string>
 

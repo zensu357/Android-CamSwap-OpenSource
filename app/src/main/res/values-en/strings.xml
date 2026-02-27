@@ -73,6 +73,8 @@
     <string name="settings_force_private_dir_desc">Fix file read issues for some apps</string>
     <string name="settings_disable_toast">Disable Toast</string>
     <string name="settings_disable_toast_desc">Hide all operation toasts</string>
+    <string name="settings_enable_photo_fake">Enable Photo Fake</string>
+    <string name="settings_enable_photo_fake_desc">Dynamic interception to inject video frames to static photo requests (High performance cost)</string>
     <string name="settings_system_permission">System Permission Settings</string>
     <string name="settings_system_permission_desc">Manage storage and notification permissions</string>
 

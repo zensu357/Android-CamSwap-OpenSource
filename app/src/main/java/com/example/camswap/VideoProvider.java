@@ -219,16 +219,11 @@ public class VideoProvider extends ContentProvider {
             return pickRandomVideo();
         }
 
-        // Delegate to VideoManager to avoid duplicated file traversal logic
         File dir = new File(ConfigManager.DEFAULT_CONFIG_DIR);
-        File[] files = dir.listFiles(file -> {
-            String name = file.getName().toLowerCase();
-            return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv");
-        });
+        File[] files = VideoManager.listVideoFiles(dir);
 
         if (files == null || files.length == 0)
             return false;
-        Arrays.sort(files);
 
         String selectedVideo = configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, null);
         int currentIndex = -1;
@@ -256,10 +251,7 @@ public class VideoProvider extends ContentProvider {
         if (!dir.exists() || !dir.isDirectory())
             return false;
 
-        File[] files = dir.listFiles(file -> {
-            String name = file.getName().toLowerCase();
-            return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv");
-        });
+        File[] files = VideoManager.listVideoFiles(dir);
 
         if (files == null || files.length == 0)
             return false;

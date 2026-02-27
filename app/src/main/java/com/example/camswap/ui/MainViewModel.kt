@@ -23,6 +23,7 @@ data class MainUiState(
     val enableRandomPlay: Boolean = false,
     val enableMicHook: Boolean = false,
     val micHookMode: String = "mute",
+    val enablePhotoFake: Boolean = false,
 
     val notificationControlEnabled: Boolean = false,
     val hasPermission: Boolean = false,
@@ -54,6 +55,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     enableRandomPlay = configManager.getBoolean(ConfigManager.KEY_ENABLE_RANDOM_PLAY, false),
                     enableMicHook = configManager.getBoolean(ConfigManager.KEY_ENABLE_MIC_HOOK, false),
                     micHookMode = configManager.getString(ConfigManager.KEY_MIC_HOOK_MODE, ConfigManager.MIC_MODE_MUTE),
+                    enablePhotoFake = configManager.getBoolean(ConfigManager.KEY_ENABLE_PHOTO_FAKE, false),
                     notificationControlEnabled = configManager.getBoolean("notification_control_enabled", false),
                     targetAppsCount = configManager.targetPackages.size,
                     originalVideoName = configManager.getString(ConfigManager.KEY_ORIGINAL_VIDEO_NAME, null)
@@ -108,6 +110,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             configManager.setString(ConfigManager.KEY_MIC_HOOK_MODE, mode)
             _uiState.update { it.copy(micHookMode = mode) }
+        }
+    }
+
+    fun setEnablePhotoFake(enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            configManager.setBoolean(ConfigManager.KEY_ENABLE_PHOTO_FAKE, enabled)
+            _uiState.update { it.copy(enablePhotoFake = enabled) }
         }
     }
 

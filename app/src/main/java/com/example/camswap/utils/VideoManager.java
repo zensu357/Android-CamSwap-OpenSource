@@ -23,6 +23,32 @@ public class VideoManager {
     private static Context toast_content;
     private static ConfigManager configManager;
 
+    /** Supported video file extensions */
+    private static final String[] VIDEO_EXTENSIONS = { ".mp4", ".mov", ".avi", ".mkv" };
+
+    /**
+     * List video files in a directory, sorted by name.
+     * 
+     * @return sorted array of video files, or null if none found
+     */
+    public static File[] listVideoFiles(File dir) {
+        if (dir == null || !dir.exists() || !dir.isDirectory())
+            return null;
+        File[] files = dir.listFiles(file -> {
+            String name = file.getName().toLowerCase();
+            for (String ext : VIDEO_EXTENSIONS) {
+                if (name.endsWith(ext))
+                    return true;
+            }
+            return false;
+        });
+        if (files != null && files.length > 0) {
+            Arrays.sort(files);
+            return files;
+        }
+        return null;
+    }
+
     public static void showToast(final String message) {
         if (toast_content != null) {
             PermissionHelper.showToast(toast_content, message);
@@ -245,16 +271,10 @@ public class VideoManager {
         }
 
         // 扫描目录中任意视频
-        File dir = new File(video_path);
-        if (dir.exists() && dir.isDirectory()) {
-            File[] files = dir.listFiles(file -> {
-                String name = file.getName().toLowerCase();
-                return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv");
-            });
-            if (files != null && files.length > 0) {
-                log("【CS】[Video] 自动选择目录中的视频: " + files[0].getName());
-                return files[0].getAbsolutePath();
-            }
+        File[] files = listVideoFiles(new File(video_path));
+        if (files != null) {
+            log("【CS】[Video] 自动选择目录中的视频: " + files[0].getName());
+            return files[0].getAbsolutePath();
         }
 
         // 无可用视频，仍返回 Cam.mp4 路径（后续解码器会处理文件不存在的情况）
@@ -272,10 +292,7 @@ public class VideoManager {
             return;
         }
 
-        File[] files = dir.listFiles(file -> {
-            String name = file.getName().toLowerCase();
-            return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv");
-        });
+        File[] files = listVideoFiles(dir);
 
         if (files != null && files.length > 0) {
             int index = ThreadLocalRandom.current().nextInt(files.length);
@@ -322,16 +339,10 @@ public class VideoManager {
         }
 
         File dir = new File(video_path);
-        File[] files = dir.listFiles(file -> {
-            String name = file.getName().toLowerCase();
-            return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv");
-        });
+        File[] files = listVideoFiles(dir);
 
         if (files == null || files.length == 0)
             return false;
-
-        // Sort to ensure consistent order
-        Arrays.sort(files);
 
         int currentIndex = -1;
         if (current_video_path != null) {

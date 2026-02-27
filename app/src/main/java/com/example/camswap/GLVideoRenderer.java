@@ -20,6 +20,7 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import android.graphics.Bitmap;
 
 /**
  * OpenGL ES 旋转渲染器。
@@ -72,37 +73,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     private FloatBuffer mVertexBuffer;
     private FloatBuffer mTexCoordBuffer;
 
-    private static final float[] VERTICES = {
-            -1.0f, -1.0f,
-            1.0f, -1.0f,
-            -1.0f, 1.0f,
-            1.0f, 1.0f,
-    };
-
-    private static final float[] TEX_COORDS = {
-            0.0f, 0.0f,
-            1.0f, 0.0f,
-            0.0f, 1.0f,
-            1.0f, 1.0f,
-    };
-
-    private static final String VERTEX_SHADER = "uniform mat4 uSTMatrix;\n" +
-            "uniform mat4 uRotMatrix;\n" +
-            "attribute vec4 aPosition;\n" +
-            "attribute vec4 aTextureCoord;\n" +
-            "varying vec2 vTextureCoord;\n" +
-            "void main() {\n" +
-            "    gl_Position = uRotMatrix * aPosition;\n" +
-            "    vTextureCoord = (uSTMatrix * aTextureCoord).xy;\n" +
-            "}\n";
-
-    private static final String FRAGMENT_SHADER = "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;\n" +
-            "varying vec2 vTextureCoord;\n" +
-            "uniform samplerExternalOES sTexture;\n" +
-            "void main() {\n" +
-            "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
-            "}\n";
+    // Shader sources, vertices, and tex coords shared via GLHelper
 
     /**
      * 创建 GL 旋转渲染器。
@@ -223,6 +194,50 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         }
     }
 
+    /**
+     * 截取当前渲染帧为 Bitmap（线程安全，同步等待 GL 线程完成）。
+     * 在 GL 线程上执行 glReadPixels，通过 CountDownLatch 与调用线程同步。
+     */
+    public Bitmap captureFrame(int width, int height) {
+        if (!isInitialized() || mReleased)
+            return null;
+        final Bitmap[] result = { null };
+        CountDownLatch latch = new CountDownLatch(1);
+        mGLHandler.post(() -> {
+            try {
+                // 1. 确保 EGL 上下文绑定
+                EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, mEGLContext);
+
+                // 2. 重新绘制一帧（确保最新画面）
+                drawFrame();
+
+                // 3. glReadPixels 读取帧
+                ByteBuffer buf = ByteBuffer.allocateDirect(width * height * 4);
+                buf.order(ByteOrder.nativeOrder());
+                GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+                buf.rewind();
+
+                Bitmap bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                bmp.copyPixelsFromBuffer(buf);
+
+                // 4. glReadPixels 输出的图像是上下颠倒的, 翻转
+                android.graphics.Matrix matrix = new android.graphics.Matrix();
+                matrix.postScale(1, -1);
+                result[0] = Bitmap.createBitmap(bmp, 0, 0, width, height, matrix, true);
+
+                bmp.recycle();
+            } catch (Exception e) {
+                LogUtil.log("【CS】【GL】captureFrame 失败: " + e);
+            }
+            latch.countDown();
+        });
+        try {
+            latch.await(2000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ignored) {
+        }
+        return result[0];
+    }
+
     private void initEGL(Surface targetSurface) {
         mEGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
         if (mEGLDisplay == EGL14.EGL_NO_DISPLAY) {
@@ -278,11 +293,17 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_WIDTH, width, 0);
         EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_HEIGHT, height, 0);
         LogUtil.log("【CS】【GL】EGL Surface dimensions initialized: " + width[0] + "x" + height[0]);
+
+        // 如果 EGL Surface 尺寸太小（例如 SurfaceHolder buffer 尚未分配），视为初始化失败
+        if (width[0] <= 1 && height[0] <= 1) {
+            throw new RuntimeException(
+                    "EGL Surface too small (" + width[0] + "x" + height[0] + "), skipping GL renderer");
+        }
     }
 
     private void initGL() {
-        int vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
-        int fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+        int vertexShader = GLHelper.loadShader(GLES20.GL_VERTEX_SHADER, GLHelper.VERTEX_SHADER);
+        int fragmentShader = GLHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, GLHelper.FRAGMENT_SHADER);
         mProgram = GLES20.glCreateProgram();
         GLES20.glAttachShader(mProgram, vertexShader);
         GLES20.glAttachShader(mProgram, fragmentShader);
@@ -316,28 +337,8 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         mInputSurfaceTexture.setOnFrameAvailableListener(this);
         mInputSurface = new Surface(mInputSurfaceTexture);
 
-        // Vertex buffers
-        mVertexBuffer = ByteBuffer.allocateDirect(VERTICES.length * 4)
-                .order(ByteOrder.nativeOrder()).asFloatBuffer();
-        mVertexBuffer.put(VERTICES).position(0);
-
-        mTexCoordBuffer = ByteBuffer.allocateDirect(TEX_COORDS.length * 4)
-                .order(ByteOrder.nativeOrder()).asFloatBuffer();
-        mTexCoordBuffer.put(TEX_COORDS).position(0);
-    }
-
-    private int loadShader(int type, String source) {
-        int shader = GLES20.glCreateShader(type);
-        GLES20.glShaderSource(shader, source);
-        GLES20.glCompileShader(shader);
-        int[] compiled = new int[1];
-        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compiled, 0);
-        if (compiled[0] == 0) {
-            String error = GLES20.glGetShaderInfoLog(shader);
-            GLES20.glDeleteShader(shader);
-            throw new RuntimeException("Shader compile failed: " + error);
-        }
-        return shader;
+        mVertexBuffer = GLHelper.createFloatBuffer(GLHelper.VERTICES);
+        mTexCoordBuffer = GLHelper.createFloatBuffer(GLHelper.TEX_COORDS);
     }
 
     /**

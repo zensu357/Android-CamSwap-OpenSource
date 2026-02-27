@@ -492,18 +492,36 @@ public class VideoToFrames implements Runnable {
         int scaleX_fp = (cropW << 16) / dstW;
         int scaleY_fp = (cropH << 16) / dstH;
 
-        // Scale Y
+        // Scale Y using Bilinear Interpolation
         for (int y = 0; y < dstH; y++) {
-            int sy = cropY + ((y * scaleY_fp) >> 16);
-            int srcRowOffset = sy * srcW;
+            float sy = cropY + y * (float) cropH / dstH;
+            int y0 = (int) sy;
+            int y1 = Math.min(y0 + 1, cropY + cropH - 1);
+            float dy = sy - y0;
+            float dy1 = 1.0f - dy;
+
             int dstRowOffset = y * dstW;
+            int srcRowOffset0 = y0 * srcW;
+            int srcRowOffset1 = y1 * srcW;
+
             for (int x = 0; x < dstW; x++) {
-                int sx = cropX + ((x * scaleX_fp) >> 16);
-                dst[dstRowOffset + x] = src[srcRowOffset + sx];
+                float sx = cropX + x * (float) cropW / dstW;
+                int x0 = (int) sx;
+                int x1 = Math.min(x0 + 1, cropX + cropW - 1);
+                float dx = sx - x0;
+                float dx1 = 1.0f - dx;
+
+                int p00 = src[srcRowOffset0 + x0] & 0xFF;
+                int p01 = src[srcRowOffset0 + x1] & 0xFF;
+                int p10 = src[srcRowOffset1 + x0] & 0xFF;
+                int p11 = src[srcRowOffset1 + x1] & 0xFF;
+
+                float val = (p00 * dx1 + p01 * dx) * dy1 + (p10 * dx1 + p11 * dx) * dy;
+                dst[dstRowOffset + x] = (byte) (int) val;
             }
         }
 
-        // Scale UV
+        // Scale UV using Nearest Neighbor (sufficient for chroma and faster)
         int srcUVStart = srcW * srcH;
         int dstUVStart = dstW * dstH;
         for (int y = 0; y < dstH / 2; y++) {

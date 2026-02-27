@@ -44,6 +44,7 @@ public class ConfigManager {
     public static final String MIC_MODE_REPLACE = "replace";
     public static final String MIC_MODE_VIDEO_SYNC = "video_sync";
     public static final String KEY_VIDEO_ROTATION_OFFSET = "video_rotation_offset"; // 视频旋转偏移角度
+    public static final String KEY_ENABLE_PHOTO_FAKE = "enable_photo_fake"; // 启用拍照替换 (动态防御)
 
     // Broadcast Actions
     public static final String ACTION_UPDATE_CONFIG = "com.example.camswap.ACTION_UPDATE_CONFIG";
@@ -113,9 +114,8 @@ public class ConfigManager {
     }
 
     private boolean reloadFromProvider() {
-        try {
-            android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
-            android.database.Cursor cursor = context.getContentResolver().query(uri, null, null, null, null);
+        android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
+        try (android.database.Cursor cursor = context.getContentResolver().query(uri, null, null, null, null)) {
             if (cursor != null) {
                 JSONObject newConfig = new JSONObject();
                 while (cursor.moveToNext()) {
@@ -139,29 +139,24 @@ public class ConfigManager {
                         newConfig.put(key, valueStr);
                     }
                 }
-                cursor.close();
 
-                // Only treat as success if we actually got some config entries.
-                // An empty cursor means the Provider hasn't loaded the config yet,
-                // so we fall through to reloadFromFile().
                 if (newConfig.length() > 0) {
                     configData = newConfig;
-                    com.example.camswap.utils.LogUtil.log("【CS】配置已通过 ContentProvider 重新加载: " + configData.toString());
+                    com.example.camswap.utils.LogUtil.log("【CS】配置已通过 ContentProvider 重新加载: " + configData);
                     return true;
                 } else {
                     com.example.camswap.utils.LogUtil
-                            .log("【CS】配置 Provider 返回的 Cursor 为空 (0 行), URI: " + uri.toString() + "，降级到文件读取");
-                    // Log caller to identify who is triggering reload
+                            .log("【CS】配置 Provider 返回的 Cursor 为空 (0 行), URI: " + uri + "，降级到文件读取");
                     com.example.camswap.utils.LogUtil
                             .log("【CS】Reload trigger stack: " + android.util.Log.getStackTraceString(new Throwable()));
                 }
             } else {
-                com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 返回的 Cursor 为空, URI: " + uri.toString());
+                com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 返回的 Cursor 为空, URI: " + uri);
                 com.example.camswap.utils.LogUtil
                         .log("【CS】Reload trigger stack: " + android.util.Log.getStackTraceString(new Throwable()));
             }
         } catch (Exception e) {
-            com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 错误: " + e.toString());
+            com.example.camswap.utils.LogUtil.log("【CS】配置 Provider 错误: " + e);
         }
         return false;
     }
@@ -259,21 +254,19 @@ public class ConfigManager {
             boolean shouldRead = (lastLoadedTime == 0) || (fileModTime > 0 && fileModTime > lastLoadedTime);
             if (shouldRead) {
                 try {
-                    FileInputStream fis = new FileInputStream(configFile);
-                    InputStreamReader isr = new InputStreamReader(fis);
-                    BufferedReader bufferedReader = new BufferedReader(isr);
                     StringBuilder stringBuilder = new StringBuilder();
-                    String line;
-                    while ((line = bufferedReader.readLine()) != null) {
-                        stringBuilder.append(line);
+                    try (BufferedReader bufferedReader = new BufferedReader(
+                            new InputStreamReader(new FileInputStream(configFile)))) {
+                        String line;
+                        while ((line = bufferedReader.readLine()) != null) {
+                            stringBuilder.append(line);
+                        }
                     }
-                    bufferedReader.close();
                     configData = new JSONObject(stringBuilder.toString());
                     lastLoadedTime = (fileModTime > 0) ? fileModTime : System.currentTimeMillis();
-                    // Debug log
                     com.example.camswap.utils.LogUtil
                             .log("【CS】Config reloaded from file: " + configFile.getAbsolutePath());
-                    com.example.camswap.utils.LogUtil.log("【CS】File content: " + configData.toString());
+                    com.example.camswap.utils.LogUtil.log("【CS】File content: " + configData);
                 } catch (Exception e) {
                     com.example.camswap.utils.LogUtil.log("【CS】Config file read error: " + e);
                     if (configData == null)
@@ -303,15 +296,6 @@ public class ConfigManager {
         try {
             configData.put(key, value);
             save();
-            if (context != null) {
-                try {
-                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
-                    context.getContentResolver().notifyChange(uri, null);
-                } catch (Exception ignored) {
-                }
-                // Send broadcast with config content
-                sendConfigBroadcast(context);
-            }
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -321,16 +305,6 @@ public class ConfigManager {
         try {
             configData.put(key, value);
             save();
-            // Notify if context is available
-            if (context != null) {
-                try {
-                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
-                    context.getContentResolver().notifyChange(uri, null);
-                } catch (Exception ignored) {
-                }
-                // Send broadcast with config content
-                sendConfigBroadcast(context);
-            }
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -359,16 +333,6 @@ public class ConfigManager {
         try {
             configData.put(KEY_TARGET_PACKAGES, jsonArray);
             save();
-            // Notify if context is available
-            if (context != null) {
-                try {
-                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
-                    context.getContentResolver().notifyChange(uri, null);
-                } catch (Exception ignored) {
-                }
-                // Send broadcast with config content
-                sendConfigBroadcast(context);
-            }
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -394,17 +358,6 @@ public class ConfigManager {
         try {
             configData.put(key, value);
             save();
-            // Notify if context is available (only for App process, Hook process usually
-            // doesn't write)
-            if (context != null) {
-                try {
-                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
-                    context.getContentResolver().notifyChange(uri, null);
-                } catch (Exception ignored) {
-                }
-                // Send broadcast with config content
-                sendConfigBroadcast(context);
-            }
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -435,8 +388,13 @@ public class ConfigManager {
                 // Best-effort
             }
 
-            // Broadcast changes if context is available
+            // Notify ContentObserver and broadcast changes
             if (context != null) {
+                try {
+                    android.net.Uri uri = android.net.Uri.parse("content://com.example.camswap.provider/config");
+                    context.getContentResolver().notifyChange(uri, null);
+                } catch (Exception ignored) {
+                }
                 sendConfigBroadcast(context);
             }
         } catch (Exception e) {
